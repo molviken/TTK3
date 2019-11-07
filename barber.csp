@@ -1,0 +1,45 @@
+N = 4
+M = 2
+B = 1
+
+COSTNAMES = {0..N-1}
+BARBERNAMES = {0..B-1}
+
+--channel enter, leave:COSTNAMES
+--channel sleep, cutDone
+channel wake, enter:COSTNAMES
+channel cutDone:Bool
+--channel waitInc, waitDec, reqWR:Int
+
+BARBER(j) =  wake?i -> cutDone!True -> BARBER(j)
+Decide(L,j) = L==0& wake?i -> BARBER(j)
+                --L<0& [] i:COSTNAMES@getCut?i -> waitDec!i -> BARBER(j)
+--BARBER(L) = L<N-1& enter?i -> BARBER(L+1) [] L>0& leave?i -> BARBER(L-1)
+--AlphaB(i) = {enter?i, leave?i}
+
+--WR(L) = reqWR!L -> WR(L)
+
+
+CUSTOMER(i) = enter!i -> wake!i -> cutDone?b& CUSTOMER(i)
+--DecideC(L,i) = L==0& wake!i -> cutDone?i -> leave!i -> CUSTOMER(i)
+--CUSTOMER(i) = enter!i -> leave!i -> CUSTOMER(i)
+--AlphaC(i) = {enter.i, leave.i, wake.i}
+
+
+--Sleep(L) = BARBER(L)
+--Fetch(L) = fetched?i -> L>0& DecL(i,L) [] fetched?i -> L==0& Sleep(L)
+
+COSTS = ||| i:COSTNAMES@CUSTOMER(i)
+BARBS = ||| i:BARBERNAMES@BARBER(i)
+TEST = COSTS[|{|wake, cutDone|}|]BARBS
+assert TEST :[deadlock free [F]]
+--STORE = COSTS [|{|reqWR|}|] BARBS
+--SYSTEM = STORE [|{|reqWR|}|] WR(0)
+--assert STORE :[deadlock free [FD]]
+--BSYSTEM = SYSTEM [|{|enter, leave|}|] BARBER(0)
+--SYSTEM = BARBER(2)
+--assert COSTS :[deadlock free [FD]]
+--assert COSTS [F= COSTS
+--assert STORE :[deadlock free [F]]
+--assert COSTS [F= BARBER(0)
+

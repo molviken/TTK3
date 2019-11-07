@@ -1,0 +1,27 @@
+TOP = 5
+BOT = 0
+channel fetch, put
+channel drive, place,take
+
+
+TAKER(L) = take -> DecL(L) -> drive -> place -> drive -> TAKER(L)
+--TAKERs(L) = take -> DecLs(L) -> TAKERs(L)
+
+
+PUTTER(L) = fetch -> put -> IncL(L) -> PUTTER(L)
+--PUTTERs(L) = put -> IncLs(L) -> PUTTERs(L)
+
+IncL(L) = BounderBuffer(L+1)
+--IncLs(L) = BounderBuffers(L+1)
+DecL(L) = BounderBuffer(L-1)
+--DecLs(L) = BounderBuffers(L-1)
+
+
+BounderBuffer(L) = TAKER(L) [] PUTTER(L)
+--BounderBuffers(L) = L>BOT & TAKERs(L) [] L<TOP & PUTTERs(L)
+BB = BounderBuffer(1)
+--BBs = BounderBuffers(1)
+assert BB [T= STOP
+assert BB [T= BB
+--assert BBs [T= BBs
+assert STOP [T= BB

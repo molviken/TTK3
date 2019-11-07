@@ -1,0 +1,15 @@
+N = 2
+
+THREADNAMES = {0..N-1}
+SEMNAMES = {0..N-1}
+channel signal, wait:SEMNAMES
+
+T(i) = wait!i -> wait!(i+1)%N -> signal!(i+1)%N -> signal!i -> T(i)
+AlphaT(i) = {wait.i, wait.(i+1)%N, signal.i, signal.(i+1)%N}
+
+S(i) = wait!i -> S(i) [] signal!i -> S(i)
+AlphaS(i) = {wait.i, signal.i}
+SYSTEM = || i:THREADNAMES@[union(AlphaT(i), AlphaS(i))]
+                        (T(i)[AlphaT(i) || AlphaS(i)] S(i))
+
+assert SYSTEM:[deadlock free [F]]

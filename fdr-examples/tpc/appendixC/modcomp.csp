@@ -1,0 +1,14 @@
+-- modcomp.csp
+
+-- Illustrating modular compression.
+
+-- Bill Roscoe
+
+-- In this file we implement the system illustrated in Figure C.2.1 of a
+-- message-passing ring supported by alternating bit protocols for
+-- passing messages round the ring.  In order to avoid deadlock we will
+-- base it on the example in chapter13/ring.csp
+
+
+
+

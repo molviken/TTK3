@@ -1,0 +1,44 @@
+--  tfr.csp
+-- Bill Roscoe, May 2012
+
+-- Implementing Timed Failures refinement in terms of refusal testing.
+
+channel a,b,c
+channel tock
+
+{-
+The Timed Failures model, like refusal testing, has refusal sets
+through the trace.  The difference is that Timed Failures only have
+them immediately before tocks.  The transformation constructed in this
+file therefore eliminates all refusals that are not before tocks
+by making the occurrence of all events a!=tock that are not the
+last events of traces unstable, and by making the states after
+events which are offered alongside tocks DIV.
+-}
+
+Sigma = diff(Events,{tock})
+
+DIV = STOP [> DIV
+
+Reg = ([] x:Sigma @ x -> Reg) [> (tock -> Reg [] ([] x:Sigma @ x -> DIV))
+
+RUN = [] x:Events @ x -> RUN
+
+-- Reg is a refinement of RUN, the identity under parallel for
+-- tick-free processes
+assert RUN [R= Reg
+
+-- So for such P, P is refined by TFM(P)
+
+TFM(P) = P [|Events|] Reg
+
+{- The only refusal sets in this combination come from states in which
+Reg is in the state after the [>.
+
+This state can only carry on after the next event if it was a tock.
+
+So the only refusal testing behaviours of the combination are ones
+of P in which refusals immediately precede tock or the very last event.
+Since tock is available from every stable state in a Timed CSP process,
+the existence of this second type of refusal sets is implied by the
+-}

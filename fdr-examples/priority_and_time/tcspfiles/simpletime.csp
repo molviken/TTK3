@@ -1,0 +1,94 @@
+-- simpletime.csp
+-- Bill Roscoe, May 2012
+
+-- Simple illustration of the use of the Timed CSP functionality of FDR.
+
+channel a,b,c
+channel tock
+
+TOCKS = tock -> TOCKS
+
+-- Any file with a Timed{} section automatically declares the event
+-- tock
+
+-- Note from the above that you can use the event tock outside a Timed section.
+-- It would not be wise to use it inside one as the role of the Timed section
+-- is to introduce tock implicitly into the definitions it contains.
+
+-- A Timed section, by default, assumes all visible events take one
+-- time unit to complete (passing control onto what follows them in a
+-- prefix)
+
+AllOne(x) = 1
+
+Timed(AllOne){
+
+P = a -> b -> P
+
+Q = a -> Q [] b -> b -> Q
+
+}
+
+-- This translation produces the equivalent of the following  P and Q
+
+TP = a -> tock -> TP'
+     [] tock -> TP
+
+TP' = b -> tock -> TP
+      [] tock -> TP'
+
+TQ = a -> tock -> TQ [] b -> tock -> TQ' [] tock -> TQ
+
+TQ' = b -> tock ->  TQ
+      [] tock -> TQ'
+
+-- note that because TP and TQ are both deterministic, the following prove
+-- equivalence
+
+assert TP [FD= P
+assert TQ [FD= Q
+
+-- Because P and Q have no taus that are alternatives to tock, it is not
+-- strictly necessary to apply
+
+external prioritise
+
+pri(P) = prioritise(P,<{},{tock}>)
+
+-- which gives tau priority over tock, but for consistency it
+-- might have been better to write
+
+assert TP [FD= pri(P)
+assert TQ [FD= pri(Q)
+
+-- The necessity of pri comes from examples like P\{b}, which we
+-- would expect to have two tocks from one a occurring to the next
+-- being possible
+
+Timed(AllOne){
+A2s = a -> WAIT(1);A2s
+}
+
+-- which is true with priority but not without
+
+assert pri(A2s) [FD= pri(P\{b})
+assert pri(A2s) [FD= P\{b}
+
+-- You can use an "event timer" parameter to Timed: a function which
+-- maps events to the times they take. For example
+
+AllZero(x) = 0
+
+Timed(AllZero){
+
+PZ = a -> WAIT(1); b -> WAIT(1); PZ
+
+}
+
+-- is equivalent to P defined above
+
+assert pri(P) [FD= pri(PZ)
+assert pri(PZ) [FD= pri(P)
+
+
+

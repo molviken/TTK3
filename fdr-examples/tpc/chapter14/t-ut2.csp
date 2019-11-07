@@ -1,0 +1,67 @@
+-- t-ut2.csp
+
+-- Relating a timed implementation to an untimed specification.
+
+-- Bill Roscoe, June 1994, adapted September 1997
+
+-- This file implements the method for relating a timed process
+-- and an untimed specification discussed in Section 14.4.2
+-- The alternative method discussed in Section 14.4.1 is illustrated in
+-- t-ut1.csp
+
+--$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$$*$
+
+-- The set-up of the system is identical to the companion file:
+
+DATA = {0,1}
+
+channel left,mid,right:DATA
+
+channel tock
+
+-- The sender process waits for an input, and then outputs it on the next
+-- time interval (i.e., after exactly one tock).  It then waits three tocks
+-- before being able to input again.
+
+S = tock -> S [] left?x -> tock -> mid!x -> tock -> tock -> tock -> S
+
+
+-- The receiver waits for an input, then outputs and returns to initial state
+-- on the next two time intervals.
+
+R = tock -> R [] mid ? x -> tock -> right!x -> tock -> R
+
+-- The system is put together by synchronising and hiding the shared data
+-- channel. and synchronising on tock (as ever).
+
+TIMP = (S [|{|tock,mid|}|] R)\{|mid|}
+
+-- Thinking about this, it is clear that the output must have occurred before
+-- three tocks have happened since the corresponding input.  This is before
+-- the next input is possible and therefore this process behaves, in an
+-- untimed sense, like a one-place buffer:
+
+COPY = left?x -> right!x -> COPY
+
+-- even though the untimed analogues of S and R would behave like a two-place
+-- buffer.  Note that there is (in common with assumptions we often make in
+-- this timed style) an assumption that the output on right is not refusable
+-- by the environment.
+
+
+N = 2
+
+channel anyother
+
+RSpec(M,0) = anyother -> RSpec(M,M)
+             []
+	     (STOP |~| tock -> RSpec(M,0))
+
+RSpec(M,r) = (tock -> RSpec(M,r-1)
+             |~| anyother -> RSpec(M,M))
+
+SpecReg = RSpec(N,N)[[anyother <- x | x <- diff(Events,{tock})]]
+
+TSpec = SpecReg [|diff(Events,{tock})|] COPY
+
+assert TSpec [FD= TIMP

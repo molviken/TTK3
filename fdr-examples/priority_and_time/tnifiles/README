@@ -1,0 +1,14 @@
+tnifiles
+
+This directory contains examples that illustrate the methods of
+checking timed noninterference described in "Checking noninterference
+in Timed CSP"
+
+The code that does the checking is common to them all and as
+described in the paper.  This is rather complex compared to most CSP/FDR
+specifications.
+
+The examples are based on multiplexing high and low-level channels,
+and on a simple cloud computing model.  Apart from the last, these are
+closely related to the case studies in the paper referred to above.
+

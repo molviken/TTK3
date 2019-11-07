@@ -1,0 +1,73 @@
+-- faildiv.csp
+
+-- illustrating failures and divergences
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of some of the main CSP processes in Section 6.1 of those into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE.  
+
+channel a,b,c,d
+
+
+P1 = (a -> b -> STOP)[](b -> a -> STOP)
+
+P2 = (c -> a -> STOP [] b -> c -> STOP)\{c}
+
+P3 = (a -> STOP) |~| (b -> STOP)
+
+P4 = (c -> a -> STOP) [] (c -> b -> STOP)
+
+-- You can try animating these and will (provided you retain enough detail)
+-- see the pictures in the figure re-appear.
+
+-- You can also try checking them for determinism, and where it fails (all
+-- except P1) will get a failure and a trace that show how they can both
+-- accept and refuse some event.
+
+-- Finally you can try checking them for refinement against each other.
+
+--%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+-- The difference between external and internal choice, and also deadlock:
+
+Q1 = a -> STOP [] b -> STOP
+
+Q2 = a -> STOP |~| b -> STOP
+
+Q3 = STOP |~| Q1
+
+assert Q3 [F= Q2
+assert Q2 [F= Q1
+
+--%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+-- A simple divergent process:
+
+DIV = let AS = a -> AS
+      within AS\{a}
+
+-- The strictness under divergence is illustrated, for example, by the
+-- equivalent
+
+assert Q3 |~| DIV [FD= DIV
+assert DIV [FD= Q3 |~| DIV
+
+-- If we let 
+
+Q4 = a -> STOP |~| b -> DIV
+
+-- then Q4 is a proper failures refinement of Q2 because it has less
+-- refusals after the trace b:
+
+assert Q2 [F= Q4
+assert Q4 [F= Q2
+
+-- but exactly the opposite relationship holds in failures/divergences
+-- refinement, which notices the divergence and treats it as disasterous:
+
+assert Q2 [FD= Q4
+assert Q4 [FD= Q2
+

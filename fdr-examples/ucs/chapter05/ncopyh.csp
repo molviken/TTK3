@@ -1,0 +1,47 @@
+-- ncopyh.csp 
+
+-- chaining COPY processes together -- with hiding for Chapter 5
+
+-- Parameterised version of COPY:
+
+N = 10  -- the number of COPYs
+
+T = {0,1}  -- the type passed over channels
+
+COPY(n) = c.n?x -> c.n+1!x -> COPY(n)
+
+channel c:{0..N}.T
+
+AC(r) = {|c.r,c.r+1|}
+
+CC = || r:{0..N-1} @ [AC(r)] COPY(r)
+
+-- Set of events to hide
+
+H = {|c.r | r <- {1..N-1}|}
+
+CCH = CC\H
+
+-- Building a specification
+
+B(s) = #s<N & c.0?x -> B(s^<x>)
+       [] #s>0 & c.N.head(s) -> B(tail(s))
+
+Spec = B(<>)
+
+-- With hiding we can compare the chain of COPYs directly with
+-- an N-place buffer:
+
+assert Spec [T= CCH 
+assert CCH [T= Spec
+
+-- For Chapter 6:
+
+-- Also true in stronger models:
+
+assert Spec [FD= CCH 
+assert CCH [FD= Spec
+
+
+
+

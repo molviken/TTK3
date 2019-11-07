@@ -1,0 +1,43 @@
+-- set.csp
+-- illustrating the compilation differences between sequential
+-- and parallel processes
+
+N = 10 -- size of set that this represents powerset of
+
+T = {0..N-1}
+
+channel isempty
+channel add,remove,isin:T
+
+-- sequential process
+
+SET(X) = card(X)==0 & isempty -> SET(X)
+         [] add?x -> SET(union({x},X))
+         [] remove?x -> SET(diff(X,{x}))
+         [] isin?x:X -> SET(X)
+
+Present(x) = isin!x -> Present(x)
+             [] add.x -> Present(x)
+             [] remove.x -> Absent(x)
+
+Absent(x) = isempty -> Absent(x)
+             [] add.x -> Present(x)
+             [] remove.x -> Absent(x)
+
+PARSET = [|{isempty}|] x:T @ Absent(x)
+
+-- The following pair of checks allow you to check the
+-- representations are equivalent
+
+assert SET({}) [FD= PARSET
+assert PARSET [FD= SET({})
+
+-- and the following allow you to test relative speeds
+
+assert STOP [T= SET({})\Events
+assert STOP [T= PARSET\Events
+
+
+
+
+

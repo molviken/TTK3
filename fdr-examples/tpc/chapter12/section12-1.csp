@@ -1,0 +1,154 @@
+-- section12-1.csp 
+
+-- simple abstraction examples
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of some of the CSP processes in Section 12.1 of those into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE.  
+
+--#+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+#
+
+-- First, a pair of functions implementing the stable-failures implementations
+-- of lazy and mixed abstraction
+
+LAbs(X)(P) = (P [|X|] CHAOS(X))\X
+
+MAbs(X,Y)(P) = let hdelay = diff(X,Y) within
+               (P [|hdelay|] CHAOS(hdelay))\X
+
+-- A couple of trivial examples to illustrate the connection between
+-- lazy abstraction and separability:
+
+channel h1,h2,l1,l2
+
+H = {h1,h2}
+L = {l1,l2}
+
+P1 = h1 -> l1 -> P1
+
+-- We can illustrate the truth of Theorem 12.1.2:
+
+assert LAbs(L)(P1) ||| LAbs(H)(P1) [F= P1
+
+-- but this deterministic
+-- process is not separable since, for example the following fails
+
+assert LAbs(L)(P1) :[deterministic [F]]
+
+-- On the other hand any process (whether deterministic or not) is
+-- separable if and only if the above refinement works in reverse,
+-- so for example CHAOS is separable
+
+assert CHAOS(union(H,L)) [F= LAbs(L)(CHAOS(union(H,L))) 
+                             ||| LAbs(H)(CHAOS(union(H,L)))
+
+-- but
+
+DF(X) = |~| x:X @ x -> DF(X)
+
+-- is not
+
+assert DF(union(H,L)) [F= LAbs(L)(DF(union(H,L))) 
+                             ||| LAbs(H)(DF(union(H,L)))
+
+
+-- Memory example 
+
+datatype USER = Lois | Hugh
+
+datatype DATA = Zero | One
+
+ADDR = {1..5}
+
+channel write:USER.ADDR.DATA
+channel value:USER.DATA
+channel  read:USER.ADDR
+channel  ok,reject:USER
+
+-- In order to test the effects of different patterns of read and write
+-- privileges, we add an extra parameter to Mem to hold these:
+
+Mem(map,s) = let 
+             (WriteAddresses, ReadAddresses) = map
+	     within
+	     (  write?user?addr?v ->
+                (if member(addr,WriteAddresses(user)) then
+	            ok.user -> Mem(map,update(s,addr,v))
+	         else
+	            reject.user -> Mem(map,s))
+             [] read?user?addr ->
+             (if member(addr,ReadAddresses(user)) then
+	         value.user!fetch(s,addr) -> Mem(map,s)
+	      else
+	         reject.user -> Mem(map,s)))
+
+-- The high, low and signal events:
+
+M_H = {|value.Hugh,read.Hugh,ok.Hugh,reject.Hugh,write.Hugh|}
+M_L = {|value.Lois,read.Lois,ok.Lois,reject.Lois,write.Lois|}
+M_S = {|value,ok,reject|}
+
+-- A starting state
+
+s_0 = {(x,Zero) | x <- ADDR}
+
+-- The state implemented as a set of pairs
+
+fetch(s,x) = let pick({y}) = y
+             within
+	     pick({v | (x',v) <- s, x'==x})
+
+update(s,x,v) = union({(x',v') | (x',v') <- s, x!=x'},{(x,v)})
+
+-- Two possible sets of write/read privileges
+
+MAP1 = ({1,2},{1,2,3},{1,4},{4})
+MAP2 = ({1,2,3},{1,2,3},{4,5},{3,4,5})
+
+wa((wh,rh,wl,rl))(u) = if u==Hugh then wh else wl
+ra((wh,rh,wl,rl))(u) = if u==Hugh then rh else rl
+
+map1 = (wa(MAP1),ra(MAP1))
+map2 = (wa(MAP2),ra(MAP2))
+
+-- the lazy abstraction of the memory can deadlock 
+
+assert LAbs(M_H)(Mem(map2,s_0)) :[deadlock free [F]]
+
+-- but the mixed abstraction cannot:
+
+assert MAbs(M_H,M_S)(Mem(map2,s_0)) :[deadlock free [F]]
+
+-- as the mixed abstraction assumes Hugh can't block the three
+-- classes of "signal" events.
+
+-- In the text it is claimed that the mixed abstraction maps this
+-- process to
+
+Mem_L(map,s) = let 
+             (WriteAddresses, ReadAddresses) = map
+	     within
+	     (  write.Lois?addr?v ->
+                (if member(addr,WriteAddresses(Lois)) then
+	            ok.Lois -> Mem_L(map,update(s,addr,v))
+	         else
+	            reject.Lois -> Mem_L(map,s))
+             [] read.Lois?addr ->
+             (if member(addr,ReadAddresses(Lois)) then
+		(if member(addr,WriteAddresses(Hugh)) then
+		 (|~| v:DATA @ value.Lois!v -> Mem_L(map,s))
+		 else
+	         value.Lois!fetch(s,addr) -> Mem_L(map,s))
+	      else
+	         reject.Lois -> Mem_L(map,s)))
+
+-- we can show this for the two maps above
+
+assert Mem_L(map1,s_0) [F= MAbs(M_H,M_S)(Mem(map1,s_0))
+assert MAbs(M_H,M_S)(Mem(map1,s_0)) [F= Mem_L(map1,s_0)
+
+assert Mem_L(map2,s_0) [F= MAbs(M_H,M_S)(Mem(map2,s_0))
+assert MAbs(M_H,M_S)(Mem(map2,s_0)) [F= Mem_L(map2,s_0)

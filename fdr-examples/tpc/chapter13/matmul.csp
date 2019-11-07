@@ -1,0 +1,69 @@
+-- matmul.csp
+
+-- The "matrix multiplication" array from Example 13.2.3
+
+-- Bill Roscoe
+
+-- As with the virtual routing network, this is a dataless version as
+-- produced by Rule 15.
+
+-- Again, we will try out a variety of compression techniques:
+
+include "compression.csp"
+transparent normal
+
+-- In this system all data moves down and right:
+
+channel d,r:{0..20}.{0..20}
+
+Node(i,j) = d.i.j -> r.i.j -> d.i+1.j -> r.i.j+1 -> Node(i,j)
+
+Alpha(i,j) = { d.i.j , r.i.j , d.i+1.j , r.i.j+1 }
+
+-- We can create this as a process list by rows:
+
+MatMul(W,H) = <(Node(i,j),Alpha(i,j)) | i <- <1..H>, j <- <1..W>>
+
+-- Or alternatively  by diagonals:
+
+AltMatMul(W,H) = <(Node(i,n-i),Alpha(i,n-i)) | n <- <2..W+H>,
+                                              i <- <1..H>,
+					      1 <= n-i,
+					      n-i <= W>
+
+--We can compare the uncompressed check:
+
+assert ListPar(MatMul(3,3)) :[deadlock free [F]]
+assert ListPar(MatMul(4,4)) :[deadlock free [F]]
+
+--against the compressed one:
+
+assert InductiveCompress(normal)(MatMul(4,4))(Events) :[deadlock free [F]]
+assert InductiveCompress(normal)(MatMul(5,5))(Events) :[deadlock free [F]]
+assert InductiveCompress(normal)(MatMul(6,6))(Events) :[deadlock free [F]]
+assert InductiveCompress(normal)(MatMul(7,7))(Events) :[deadlock free [F]]
+
+-- Unlike the virtual routeing network, compression does not seem to
+-- allow us to handle more or less arbitrary networks, but does certainly
+-- help a great deal.  The row-at-a-time approach of the virtual routeing
+-- does not win you anything here: the inductive approach above seems to
+-- be best because it keeps the external interface set (the set of events
+-- that cannot be hidden) as small as possible though the build-up of
+-- the system.
+
+-- This is well illustrated by the difference in running speed between
+-- the essentially equivalent checks
+
+assert InductiveCompress(normal)(MatMul(4,10))(Events) :[deadlock free [F]]
+assert InductiveCompress(normal)(MatMul(10,4))(Events) :[deadlock free [F]]
+
+-- where the second is built up leaving larger visible sets of events,
+-- and so runs much slower.
+
+-- You could experiment with the effects of building the network up in
+-- different orders, or with changing the order (or parallelizing the order)
+-- of the communications in each node.  My suspicion is that this is
+-- unlikely to improve the compressions, but you never know!
+
+
+

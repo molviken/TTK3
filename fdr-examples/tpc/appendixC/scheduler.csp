@@ -1,0 +1,118 @@
+-- Modelling Milner's Scheduler in CSP
+
+-- Bill Roscoe, July 1996
+
+-- This file shows how the benchmark example of a simple scheduler
+-- can be handled in FDR, and how the hierarchical compression
+-- enables sometimes very large systems to be dealt with...
+
+-- It is taken from Milner's book.
+
+include "compression.csp"
+
+transparent normal
+transparent sbisim
+
+channel a,b,c:{0..N-1}
+
+-- Each cell cycles on 4 events, two of which (a.i and b.i) are unique
+-- to it and two of which are synchronisations with its neighbours
+-- in a ring.  The overall objective is to get the a.i to follow a strict
+-- cyclic order, and to have the event b.i happen once between each pair
+-- of a.i's, with none until the first a.i.
+
+Cell(i) = if i>0 then c.i -> a.i -> c.((i+1)%N) -> b.i -> Cell(i)
+          else a.0 -> c.1 -> b.0 -> c.0 -> Cell(i)
+
+AlphaCell(i) = {a.i,b.i,c.i,c.(i+1)%N}
+
+-- The number of processes in the ring...
+
+N = 40
+
+-- most of the checks in this file will work for significantly larger
+-- N than this, but for the ones where little or no useful compression
+-- exists requires it to be rather smaller ( < 17, or thereabouts)
+
+
+-- The following defines the network as a list of alphabetised processes
+
+SchedList = <(Cell(i),AlphaCell(i)) | i <- <0..N-1>>
+
+-- The following trace specification asserts that the a.i happen
+-- in cyclic order; plainly the events relevant to it are {|a|}
+
+Spec(n) = a.n -> Spec((n+1)%N)
+
+-- The following uses the compression function LeafCompress
+-- to build up the network in such a way that it can optimally be
+-- checked against the rotation of a's spec.
+
+assert Spec(0) [T= LeafCompress(normal)(SchedList)(diff(Events,{|a|}))
+
+-- whereas you will find that the inductive approach is, for reasons
+-- discussed in the text, very poor:
+
+assert Spec(0) [T= InductiveCompress(normal)(SchedList)(diff(Events,{|a|}))
+
+-- The following is the process to check for deadlock freedom.
+-- Here we can hide (and this use compression on) all events.
+
+-- Both of the following work, though the simpler leaf compression is
+-- faster.
+
+assert LeafCompress(normal)(SchedList)(Events) :[deadlock free [F]]
+assert InductiveCompress(normal)(SchedList)(Events) :[deadlock free [F]]
+
+-- The effect of the choice of one compression function over another
+-- is graphically demonstrated by the following check, where the
+-- replacement of normal by strong bisimulation enitrely
+-- loses the benefit.  The reason is that sbisim does not eliminate
+-- the tau actions created by hiding.  All of the other compressions
+-- would have equivalent effect to normal in this case.
+
+assert LeafCompress(sbisim)(SchedList)(Events) :[deadlock free [F]]
+
+-- We might speculate that there is always at least one a.i offered.
+-- This can be tested via the abstracted check:
+
+assert MixedAbsLeafCompress(normal)(SchedList)({|b,c|},{|c|}):[deadlock free[F]]
+
+-- which fails, as if b's are blocked for ever then eventually the
+-- a's have to stop.
+
+-- The above prove their properties very quickly, often in time linear
+-- in N.  If a specification has all a's and all b's in its alphabet
+-- there is no useful compression to be gained from LeafCompress, and
+-- the gains from Structured compression are not as great as one
+-- might hope.  An example follows, proving that the total number of
+-- b's lies between that of a's and that of a's minus N.
+
+AB(k) = k<N & a?i -> AB(k+1)
+      []k>0 & b?i -> AB(k-1)
+
+ABSpec = AB(0)
+
+System = (|| i:{0..N-1} @ [AlphaCell(i)] Cell(i))\({|c|})
+
+-- The check without any compression...
+
+assert ABSpec [T= System
+
+-- The check using Structured Compression ...
+
+transparent diamond
+
+assert ABSpec [T= StructuredCompress(diamond)(groupsof(5)(SchedList))({|c|})
+
+-- However it is possible to check properties involving small numberso
+-- of a's and b's successfully:
+
+SmallAB = a.0 -> SmallAB'
+SmallAB'= a.0 ->  b.N/2 -> SmallAB'
+         [] b.N/2 -> SmallAB
+
+AlphaSmallAB = {a.0,b.N/2}
+
+assert SmallAB [T=LeafCompress(normal)(SchedList)(diff(Events,AlphaSmallAB))
+

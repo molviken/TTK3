@@ -1,0 +1,114 @@
+-- dudcounter.csp
+
+-- This file illustrates what can go wrong when you use a non-constructive
+-- recursion.  It is based on the example Z2, which is in turn based on
+-- the enslavement-recursion counter in chapter4 (and the file infexamples.csp
+-- there). You can find discussions of this example in both sections 8.2
+-- and 8.3
+
+channel up,down,iszero,m_up,m_down,m_iszero
+
+--^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^^&^
+
+-- The well-behaved version (more-or-less copied from the earlier file) is
+
+ZeroE = F1(ZeroE)
+
+F1(P) = up -> (Succ [m_up <-> up, m_down <-> down, m_iszero <-> iszero] P)
+     [] iszero -> P
+
+Succ = down -> (m_iszero -> NoSucc
+	     [] m_down -> Succ)
+    [] up -> m_up -> Succ
+
+NoSucc = iszero -> NoSucc
+      [] up -> Succ
+
+--*!**!**!**!**!**!**!**!**!**!**!**!**!**!**!**!**!**!**!**!**!**!**!**!**!*
+
+-- The badly behaved one only differs in that it increments and
+-- decrements its slave counter twice for each input rather than once:
+
+AZ = down -> (m_iszero -> AZ'
+             [] m_down -> m_down -> AZ)
+     [] up -> m_up -> m_up -> AZ
+
+AZ' = iszero -> AZ'
+     [] up -> AZ
+
+-- If you run the process Z2 below on ProBE and take it past the
+-- value 2 (via 2 ups) you will see it performing an infinity of taus
+-- (or at least as many as you have patience to see!).
+
+F2(P) = up -> (AZ [m_up <-> up, m_down <-> down, m_iszero <-> iszero] P)
+     [] iszero -> P
+
+Z2 = F2(Z2)
+
+-- Thus the subtly altered recursion produces a gross change in behaviour.
+
+--+%++%++%++%++%++%++%++%++%++%++%++%++%++%++%++%++%++%++%++%++%++%++%++%++%+
+
+-- As discussed in the text, the under-defined function F2 has a number
+-- of fixed points, whereas the constructive F1 should only have one.  
+
+-- You can't check on FDR that the well-behaved COUNTer is a fixed point
+-- of F2, since it is infinite state, but you will gain some understanding
+-- from animating it.  The behaviour is easiest to see with the 
+-- tail-recursive
+
+COUNT(0) = up -> COUNT(1)
+          [] iszero -> COUNT(0)
+
+COUNT(n) = down -> COUNT(n-1)
+          [] up -> COUNT(n+1)
+
+-- where the two recursive functions applied give
+
+F1C = F1(COUNT(0))
+F2C = F2(COUNT(0))
+
+-- In a perverse way, since ZeroE = COUNT(0), you can also investigate
+
+F2ZE = F2(ZeroE) 
+
+-- All of F1C F2C and F2ZE are equivalent to COUNT(0), though of course
+-- this is achieved with rather different state evolutions.
+
+-- The other three fixed points mentioned in the text are all finite state:
+-- BCOUNT, PCOUNT and LFP, where
+
+BCOUNT = iszero -> BCOUNT
+        [] up -> (down -> BCOUNT 
+		 [] up -> (up -> STOP [] down -> STOP))
+
+PCOUNT = iszero -> PCOUNT
+        [] up -> (down -> PCOUNT
+		 [] up -> MANY)
+
+MANY = up -> MANY
+      [] down -> MANY
+
+BOTTOM = SKIP;BOTTOM
+
+LFP = iszero -> LFP
+     [] up -> (down -> LFP
+	      [] up -> BOTTOM)
+
+-- Therefore the fact that they are all fixed points of F2 can be
+-- verified (LFP would not work over [T=)
+
+assert BCOUNT [FD= F2(BCOUNT)
+assert F2(BCOUNT) [FD= BCOUNT
+assert PCOUNT [FD= F2(PCOUNT)
+assert F2(PCOUNT) [FD= PCOUNT
+assert LFP [FD= F2(LFP)
+assert F2(LFP) [FD= LFP
+
+-- The failure of the corresponding equivalences for F1 (the constructive
+-- version) can be verified:
+
+assert BCOUNT [FD= F1(BCOUNT)
+assert PCOUNT [FD= F1(PCOUNT)
+assert F1(LFP) [FD= LFP
+

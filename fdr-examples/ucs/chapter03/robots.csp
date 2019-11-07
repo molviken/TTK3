@@ -1,0 +1,98 @@
+
+-- robots1.csp
+
+-- illustrating parallel composition as conjunction
+
+-- A.W. Roscoe
+
+-- This file covers the example of parallel combination as
+-- conjunction in the final sections of Chapter 2 (TPC) and Chapter 3 (UC)
+
+-- This is the first of two file on the same example: this one gives
+-- a "pure" presentation that cannot be run on FDR, though it can
+-- on ProBE.
+
+-- The roaming robot is defined
+
+channel position:(Int,Int) 
+
+channel north,south,east,west
+
+ROBOT(n,m) = position.(n,m) -> ROBOT(n,m)
+             [] north -> ROBOT(n+1,m)
+             [] south -> ROBOT(n-1,m)
+             [] east -> ROBOT(n,m+1)
+             [] west -> ROBOT(n,m-1)
+
+-- This is of course, an infinite-state process and it cannot be run on
+-- FDR, even if put in a context that would restrict it to finitely many
+-- of its states.
+
+CT(a,b,0) = a -> CT(a,b,1)
+
+CT(a,b,n) = a -> CT(a,b,n+1)
+         [] b -> CT(a,b,n-1)
+
+-- It is entirely possible to define derived process-level operators in
+-- this version of CSP.  As an example, suppose P is a given process and
+-- Q is a process we are going to put in parallel with P to limit P's
+-- behaviour, whose communications lie within A (the set of P's events
+-- it is to have control over).  We can encapsulate this in the function
+
+AddCond(P,A,Q) = P [|A|] Q
+
+-- Arguably it would have been better to have written
+
+-- AddCond(P,A,Q) = P [Events||A] Q
+
+-- but this would not work in this case since (thanks to the channel
+-- position) the set Events is infinite, meaning that the present tools
+-- cannot handle parallel combinations with it as a parameter;
+
+-- and indeed a list of process/process pairs can be added as
+-- constraints
+
+ListConds(P,<>) = P
+ListConds(P,<(Q,A)>^cs) = ListConds(AddCond(P,A,Q),cs)
+
+-- Note the use of pattern-matching on sequences here.
+
+-- The restriction of the robot to the NxM table can then be written
+
+N = 3
+M = 5
+
+RobotOnTable = ListConds(ROBOT(0,0),
+               <(CT(north,south,0),{north,south}),
+                (CT(south,north,N),{north,south}),
+                (CT(east,west,0),{east,west}),
+                (CT(west,east,M),{east,west})>)
+
+
+BLOCK(r,s,n,m) = (n!=r-1 or m!=s) & north -> BLOCK(r,s,n+1,m)
+              [] (n!=r+1 or m!=s) & south -> BLOCK(r,s,n-1,m)
+              [] (n!=r or m!=s-1) & east -> BLOCK(r,s,n,m+1)
+              [] (n!=r or m!=s+1) & west -> BLOCK(r,s,n,m-1)
+
+-- You can now design whatever pattern of these you like, for example
+
+Blocks = <(BLOCK(r,s,0,0),{north,south,east,west}) |
+          r <- <0..N>, s<-<0..M>, r%3==2, s%3==1>
+
+RobotWithBlocks = ListConds(RobotOnTable,Blocks)
+
+-- though the complex parallel composition that results is relatively
+-- slow to evaluate on ProBe.  The same sort of effect can be had
+-- more efficiently by defining a single process which takes a finite
+-- set of illegal squares, rather than the parallel composition of one
+-- for each.
+
+BlockSet(S,n,m) = not member((n+1,m),S) & north -> BlockSet(S,n+1,m)
+               [] not member((n-1,m),S) & south -> BlockSet(S,n-1,m)
+               [] not member((n,m+1),S) & east -> BlockSet(S,n,m+1)
+               [] not member((n,m-1),S) & west -> BlockSet(S,n,m-1)
+
+S = {(r,s) | r <- {0..N}, s<-{0..M}, r%2==1, s%2==1}
+
+RobotWithBlockSet = AddCond(RobotOnTable,{north,south,east,west},BlockSet(S,0,0))
+

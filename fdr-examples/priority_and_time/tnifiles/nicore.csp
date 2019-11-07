@@ -1,0 +1,224 @@
+
+-- time-dependent multiplexer
+
+-- version with noninterfering core and terminal processes
+
+-- Bill Roscoe, January 2012
+
+-- Example from "Checking noninterference in Timed CSP"
+-- (first case study)
+-- extended by terminal processes.
+
+
+-- Basic definitions of agents and alphabets:
+datatype Agent = hugh | lois | henry | leah
+SAgent = {hugh,lois}
+
+
+HAgent = {hugh,henry}
+LAgent = {lois,leah}
+dual(hugh) = henry
+dual(henry) = hugh
+dual(leah) = lois
+dual(lois) = leah
+
+ack = 99
+T = {0,1}
+TA = union(T,{ack})
+
+channel in,out:Agent.TA
+channel send,rec:Agent.T
+channel tock
+
+-- Alphabet (only parts of which are relevant to each given
+-- noninterference check):
+
+Sigma = {|send,rec,in,out|}
+
+-- High and Low partition
+
+H = {|send.h,rec.h,in.h,out.h | h <- HAgent|}
+L= {|send.l,rec.l,in.l,out.l | l <- LAgent|}
+
+external prioritise
+
+pri(X) = prioritise(X,<{},{tock}>)
+
+
+AllOne(x) = 1
+
+
+-- The following code develops the medium that is known to be noninterfering
+-- at an untimed level into one that is noninterfering in a timed
+-- sense also.
+-- It is then interates this
+-- into the structure of medium-with terminal processes.
+-- Thus it is noninterfering by construction but....
+
+Timed(AllOne){
+
+-- Medium:
+
+TM(C) = let E = diff(SAgent,{a | (a,x) <- C}) within
+        in?a:E?x -> TM(union(C,{(a,x)}))
+       [] ([] (a,x):C @ out!dual(a)!x -> TM(diff(C,{(a,x)})))
+
+-- Simple terminal processes
+
+THugh = send.hugh?x -> in.hugh!x -> out.hugh.ack -> THugh
+TLois = send.lois?x -> in.lois!x -> out.lois.ack -> TLois
+TLeah = out.leah?x:T -> rec.leah.x -> in.leah.ack -> TLeah
+THenry = out.henry?x:T -> rec.henry.x -> in.henry.ack -> THenry
+
+Terms = THugh ||| TLois ||| TLeah ||| THenry
+
+-- Developing a scheduler so that the medium is itself noninterfering
+-- in the timed sense:
+
+HO = 3
+LO = 3
+HB = 1   -- value that works
+-- HB = 0 value that introduces potential for inf flow, detectable by 
+-- System[|H|] STOP [F= LAbs(System)
+LB = 1
+
+HS = [] x:H @ x -> HS
+LS = [] x:L @ x -> STOP
+
+-- Scheduler allows high and low level events for fixed and alternating
+-- periods, with gaps in between.  At most one low one is allowed in each
+-- period to prevent a transient event that would be non-quasi-deterministic.
+
+Sched = (HS/\WAIT(HO));WAIT(HB);(LS/\WAIT(LO));WAIT(LB);Sched
+
+-- The scheduled medium
+
+SchedMedium = (TM({}) [|Events|]Sched)
+
+-- The scheduled medium with terminals added.
+
+System = (Terms [|{|in,out|}|] SchedMedium)\{|in,out|} 
+
+-- Satisfies weak timed noninterference, but not the full version
+-- because of transients making the process without high events not QD.
+
+
+}
+
+
+
+
+max(x,y) = if x>y then x else y
+
+-- Check for quasi-determinism
+
+channel tock1, tock2, tock2'
+
+-- We are going to set up a system in which copy 1 "leads" on non-tock events
+-- and copy 2 "follows".  To ensure this order we give copy1 a token which
+-- then passes backwards and forwards between the pair so they strictly
+-- alternate on non-tock events:
+
+ channel to1,to2
+
+R1 =  ([] x:Sigma @ x -> to2 -> to1 ->  R1)
+
+R2 = to2 -> ([] x:Sigma @ x -> to1 -> R2)
+
+
+COPY1(P) = P[[tock <- tock1]][|Sigma|] R1 
+COPY2(P) = P[[tock <- tock2, tock <- tock2']][|Sigma|] R2 
+
+-- (Note that this construction does not allow properly for _tick)
+
+-- The out-hand side of our   check becomes
+
+RHS(P) = (COPY1(P) [|{to1,to2}|] COPY2(P))\{to1,to2} [|diff(Events,{to1,to2})|]MaxReg
+
+-- where 
+
+MaxReg = tock1 -> MaxRegt
+         [] ([]x:Sigma @ x -> x -> MaxReg)
+
+-- This is the state the regulator is in when the two copies are at parity
+-- (in time and trace).
+
+MaxRegt = [] x:Sigma @x -> MaxRegt'(x)
+          [] tock1 -> tock2 -> MaxRegt
+
+-- This is the state the regulator is in when COPY1 is one tock ahead:
+-- if it does another then the second must perform tock to catch up to
+-- only one behind.  If it does an event x then we must test that
+-- either the other copy could not refuse it before its next tock, 
+-- or that it cannot refuse it after.
+
+MaxRegt'(x) = ((x -> STOP [] tock2' -> x -> MaxReg))|~|tock2 -> x -> MaxReg
+
+-- The first branch of this |~| is what tests this under a priority assumption.
+
+-- We give tock2' lower priority here than all other events.  Therefore if
+-- tock2' is performed then x must have been refused, so x is offered
+-- to check that it cannot be refused.
+
+-- We know that the trace <tock2,x>  is possible in COPY2, though it
+-- it is possible for the process to refuse x after tock2 in COPY2
+-- and still behave properly.  So the specification will not say that
+-- x must be accepted after tock2.  We actually need the second clause
+-- to check subsequent behaviour when the x from COPY1 is refused after,
+-- but not before, the tock2 of the first clause.
+
+-- The STOP above corresponds with the case where an event after tock1
+-- has been matched by one before tock2.  In that case the traces are
+-- no longer the same so there is no more to check.
+
+
+-- We compare this process against the failures specification:
+
+LHS = (tock1 -> LHSt
+      [] ([]x:Sigma@(x -> x -> LHS))) 
+      |~| STOP
+
+-- if COPY1 performs an initial x in Sigma, COPY2 must respond.
+
+LHSt = (tock1 -> tock2 -> LHSt -- as with MaxRegt 
+      [] ([] x:Sigma @x -> LHSt'(x)))
+      |~| STOP
+   
+
+LHSt'(x) = ((x -> STOP |~| tock2' -> x -> LHS))
+              |~|tock2 -> ((x -> LHS)|~| STOP)
+
+
+CHAOST = ([] x:H @ x -> CHAOST) [> tock -> CHAOST
+
+transparent wbisim
+
+LAbs(P) = wbisim(CHAOST [|union(H,{tock})|] pri(P))\H
+
+-- Noninterference checks:
+
+wSchedMedium = wbisim(SchedMedium)
+wSystem = wbisim(System)
+
+-- Complete check of SchedMedium:
+assert LHS [F= prioritise(RHS(LAbs(wSchedMedium)),<diff(Events,{tock2'}),{tock2'}>)
+
+-- Same check factored into two parts:
+assert LHS [F= prioritise(RHS(LAbs(wSchedMedium[|H|]STOP)),<diff(Events,{tock2'}),{tock2'}>)
+assert pri(wSchedMedium[|H|]STOP) [F= LAbs(wSchedMedium)
+
+assert LHS [F= prioritise(RHS(LAbs(wSystem)),<diff(Events,{tock2'}),{tock2'}>)
+
+-- Same check factored into two parts:
+assert LHS [F= prioritise(RHS(LAbs(wSystem[|H|]STOP)),<diff(Events,{tock2'}),{tock2'}>)
+assert pri(wSystem[|H|]STOP) [F= LAbs(wSystem)
+
+-- Note that we have to apply the timing priority operator to
+-- Timed CSP when it "comes out" of a Timed section irrespective
+-- of the fact that we are applying the special priority operator
+-- outside that.  Not doing so means in this case that the Timed CSP
+-- regulator does not work.
+
+
+
+

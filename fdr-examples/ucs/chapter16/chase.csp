@@ -1,0 +1,57 @@
+-- chase.csp
+
+-- Illustrating the properties of the chase operation
+
+-- The archetypal application is to a parallel/hiding implementation
+-- of a deterministic process, as in the intruder of cryptoprotocol models
+-- See nspk.csp in TPC chapter 15.
+
+
+
+-- A good source fo such systems is confluence:
+
+
+N = 4
+
+-- A confluent system: Cyclic Communication Network
+-- (Same basic example as in chapter17/btconf.csp)
+
+
+channel  h:{0..N-1}.{0..N}
+channel  v:{0..N}.{0..N-1}
+
+Node(i,j) = h.i.j -> v.i.j -> h.i.j+1 -> v.i+1.j -> Node(i,j)
+
+Alpha(i,j) = {h.i.j,v.i.j,h.i.j+1,v.i+1.j}
+
+Internal = {h.i.j, v.j.i | i <-{0..N-1}, j <-{1..N-1}}
+
+-- So here is a confluent process
+
+Network = (|| i:{0..N-1},j:{0..N-1} @ [Alpha(i,j)] Node(i,j))\Internal
+
+
+assert Network :[deadlock free[F]]
+
+-- which we can "compress" using chase:
+
+transparent chase
+
+assert chase(Network) :[deadlock free[F]]
+
+-- You can use the above checks to compare state spaces: unlike other 
+-- compressions it makes sense to apply chase at the outermost level (though
+-- it can also be applied at inner levels).
+
+-- But if you apply chase to a nondeterministic process it is likely it
+-- will change the semantic value: always giving a refinement but
+-- sometimes a proper refinement.
+
+channel a,b
+
+ND = a -> ND |~| b -> ND
+
+-- Sometimes this effect is exactly what you want: see Exercise 20.2.
+
+assert ND [F= chase(ND)
+assert chase(ND) [F= ND

@@ -1,0 +1,107 @@
+
+
+-- warnsdorffpri.csp
+-- Bill Roscoe
+-- Applying a well-known heuristic to solving the knights tour problem
+-- version using new priority function: Feb 2011
+
+-- See Section 20.1/20.3 of UCS
+
+-- This version does not take advantage of the renaming trick that
+-- allows faster compilation.  See warnsdorffren.csp.
+
+N = 8  -- Board dimension: much bigger than 8 means livelock check needed below.
+
+Coords = {(i,j) | i <- {0..N-1}, j <- {0..N-1}}
+
+channel move:{0..8}.Coords
+channel done
+
+channel tohere,toadj,tooth:{0..8}
+
+
+-- The first component of move.n.p is the number of empty squares
+-- adjacent to p.
+
+PriEmpty(p,n) = n>0& (move?_?q:adj(p) -> PriEmptyA(p,n-1)
+                [] move?_?q:diff(Coords,union(adj(p),{p})) -> PriEmpty(p,n))
+
+PriEmptyA(p,n) = n>0&(move.n.p -> PriFull(p)
+                 [] move?_?q:diff(Coords,union(adj(p),{p})) -> PriEmpty(p,n))
+
+PriFull(p) = done -> PriFull(p)
+            [] move?_?q:diff(Coords,{p}) -> PriFull(p)
+
+
+-- Equivalents via renaming:
+
+PriE(n) = n>0 & (toadj?_ -> PriEA(n-1)
+       [] tooth?_ -> PriE(n))
+
+PriEA(n) = (tohere.n -> PriF
+         [] tooth?_ -> PriE(n))
+
+PriF = done -> PriF
+       [] toadj?_ -> PriF
+       [] tooth?_ -> PriF
+
+
+-- There are two options in the following, depending on whether we want
+-- a tour or circuit
+
+PriKnight(p) =  move?_?q -> PriKnight(q)
+--             [] member(p,adj((0,0))) & done -> PriKnight(p) -- for circuit
+             []  done -> PriKnight(p) -- for circuit
+-- done -> PriKight(p)  -- for tour
+
+kndel = {(2*p,q),(p,2*q) | p <- { -1,1}, q <- { -1,1}}
+
+adj((i,j)) = inter(Coords,{(i+x,j+y) | (x,y) <- kndel})
+
+
+Init(p) = if p==(0,0) then PriFull(p)
+          else if member(p,adj((0,0))) then PriEmptyA(p,card(adj(p))-1)
+          else PriEmpty(p,card(adj(p)))
+
+
+FInit(p) = (if p==(0,0) then PriF
+           else if member(p,adj((0,0))) then PriEA(card(adj(p))-1)
+           else PriE(card(adj(p))))
+                    [[tohere.n <- move.n.p | n <- {0..8}]]
+                    [[toadj.n <-move.n.q  | n <- {0..8}, q <- adj(p)]]
+                    [[tooth.n <-move.n.q  | n <- {0..8}, 
+                             q <- diff(Coords,union(adj(p),{p}))]]
+                                          
+
+
+Board = [|{|move,done|}|] p:Coords  @ FInit(p)
+
+Puzzle =  Board [|{|move,done|}|] PriKnight((0,0))
+
+external prioritise
+
+-- The priority function takes a process and (with two alternate r
+-- representations) a list of events with successively lower priority,
+-- the first being equivalent in priority to tau.
+
+-- So here are some alternate prioritisations: the first is Warnsdoff
+-- second "anti-Warnsdorff", third a refined Warnsdorff.
+
+PriPuz = prioritise(Puzzle,<{|move.n|} | n <- <0..8>>)
+PriPuz2 = prioritise(Puzzle,<{|move.8-n|} | n <- <0..8>>)
+PriPuz3 = prioritise(Puzzle,<{|move.n.(x,y) | y <- {0..N-1},x <- {0..4}|}, {|move.n.(x,y) | y <- {0..N-1},x <- {5..N-1}|} | n <- <0..8>>)
+
+
+
+Moves = move?_ -> Moves
+
+assert STOP [T= PriPuz\{|move|}
+
+-- The livelock ones are more effective...
+assert  PriPuz\Events :[livelock-free]
+assert Moves [T= PriPuz
+assert Moves [T= PriPuz2
+assert Moves [T= PriPuz3
+assert  PriPuz3\Events :[livelock-free]
+
+

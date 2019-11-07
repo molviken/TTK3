@@ -1,0 +1,97 @@
+-- indphils.csp
+
+-- Bill Roscoe
+
+-- applying induction to the dining philosophers
+-- See Chapter 17 of Understanding Concurrent Systems
+
+-- instead of identifying processes by index, we use link parallel to join
+-- them together and therefore achieve uniform interfaces for arbitrary
+-- chains of philosophers (who are stripped to bare essentials) and forks:
+
+datatype Move = Up | Down
+
+channel left, right : Move
+
+FORK = left.Up->left.Down->FORK [] right.Up->right.Down->FORK
+
+LHPHIL = left.Up-> right.Up-> left.Down->right.Down-> LHPHIL
+RHPHIL = right.Up-> left.Up-> left.Down->right.Down-> RHPHIL
+
+AMBIPHIL = ((left.Up -> SKIP)|||(right.Up -> SKIP));
+           ((left.Down -> SKIP)|||(right.Down -> SKIP)); AMBIPHIL
+
+-- Building a grammar of networks of three sorts of philosopher
+
+datatype Handed = LH | RH | AMBI
+
+FLH = FORK [right <-> left] LHPHIL
+FRH = FORK [right <-> left] RHPHIL
+FAH = FORK [right <-> left] AMBIPHIL
+
+
+
+
+PHILS(<LH>) =FLH
+PHILS(<RH>) =FRH
+PHILS(<AMBI>) =FAH
+
+PHILS(<LH>^PS) = FLH [right <-> left] PHILS(PS)
+PHILS(<RH>^PS) = FRH [right <-> left] PHILS(PS)
+PHILS(<AMBI>^PS) = FAH [right <-> left] PHILS(PS)
+
+-- Since we are analysing for deadlock, we seek an inductive
+-- proof over the stable failures model.
+
+-- The following pair work for left and right handed ones:
+
+
+CDDL = left.Up -> CUDL
+      [> right.Up -> CDUL
+
+CUDL = left.Down -> CDDL
+      [] right.Up -> CUUL
+
+CDUL = left.Up -> CUUL
+      [] right.Down -> CDDL
+      [] DIV
+
+DIV = DIV |~| DIV
+
+CUUL = left.Down -> CDUL
+      [] right.Down -> CUDL
+      [] DIV
+
+-----
+
+CDDR = right.Up -> CDUR
+       [] left.Up -> CUDR
+       [] DIV
+
+CUDR = left.Down -> CDDR
+      [] right.Up -> CUUR
+
+CDUR = left.Up -> CUUR
+      [] right.Down -> CDDR
+      [] DIV
+
+CUUR = right.Down -> CUDR
+      [> left.Down -> CDUR
+
+-- The following checks establish the values of the inductive
+-- processes and the inductions themselves.
+
+assert PHILS(<LH,LH,LH>) [F= CDDL
+assert CDDL [F= PHILS(<LH,LH,LH>) 
+assert CDDL [F= FLH [right <-> left] CDDL
+assert FLH [right <-> left] CDDL [F= CDDL
+
+assert PHILS(<RH,RH,RH>) [F= CDDR
+assert CDDR [F= PHILS(<RH,RH,RH>) 
+assert CDDR [F= FRH [right <-> left] CDDR
+assert FRH [right <-> left] CDDR [F= CDDR
+
+-- Examining more heterogeneous chains....
+
+assert PHILS(<RH,LH,RH>) [F= PHILS(<LH,RH,LH>)
+assert PHILS(<LH,RH,LH>) [F= PHILS(<RH,LH,RH>)

@@ -1,0 +1,179 @@
+include "compression.csp"
+transparent normal
+transparent explicate
+transparent diamond
+transparent sbisim
+
+-- Sliding window protocol, FDR2 version
+-- This is an abbreviated version encompassing compression
+
+-- Bill Roscoe, July 1996
+
+-- This updated version of the protocol is closely based on the
+-- FDR1 file swp1.csp, the main difference is that the window-length
+-- is an easily-changeable parameter.  We also use the lazily-abstracted
+-- error mechanism.
+
+-- This version presents a simple version of the protocol with the windows
+-- rotating in a finite space of twice their length.
+
+-- CHANNELS AND DATA TYPES
+-- left and right are the external input and output, which we set to
+-- one-bit.  a and b carry a tag and a data value.
+
+datatype Values = Zero | One | Null
+
+DATA = {Zero,One}
+
+-- The following parameter defines the window length:
+
+WL = 3
+
+-- and the following set is the rotating set of indices that will
+-- attached to messages.  The details of the present protocol rely
+-- heavily on the fact that this set runs through twice WL values,
+-- primarily since it means that a message with index i is always placed
+-- at i%TC
+
+TC = 2*WL
+
+TAG = {0..TC-1}
+
+channel left,right:DATA
+channel a,b:TAG.DATA
+channel c,d:TAG
+
+-- The overall specification we want to meet is that of a buffer.  The
+-- most nondeterministic (left-to-right) buffer with size bounded by N is
+-- given by BUFF(<>), where
+
+BUFF(s) = if (null(s)) then (left?x -> BUFF(<x>))
+          else  ((right!(head(s)) -> BUFF(tail(s)))
+                 [](STOP |~| (if ((#s)==N) then STOP
+                              else (left?x -> BUFF(s^<x>)))))
+
+-- For our purposes we will set
+
+N = WL  
+
+-- since this limits the buffering introduced
+
+SPEC = BUFF(<>)
+
+-- The protocol is designed to work in the presence of lossy channels.
+-- The following process keeps the error mechanism visible so we can
+-- use lazy abstraction methods.
+
+channel error1,error2
+
+E = a?tag?data -> (error1 -> E [] b!tag!data -> E)
+
+F = c?tag -> (error2 -> F [] d!tag -> F)
+
+-- The implementation of the protocol consists of a sender process and
+-- receiver process, linked by E and F above.  They each have a picture
+-- of part of the sequence of values.  A value may not be present for
+-- various reasons, so we need a Null value.  This explains the presence
+-- of this value in the Value type above
+
+
+-- The sender and receiver processes will each hold a list of WL Values.
+-- The following function allows us to modify a chosen component...
+
+update(xs,k,x) = take(k)(xs)^<x>^drop(k+1)(xs)
+
+-- The SEND process has a parameter n that represents the index of the
+-- next message to be input to it.  Therefore its
+-- current window is from n-WL to n-1, so an index k is in-window if
+-- (k-n+WL)%TC is in the range 0..WL-1
+
+inrange(n,k) = ((TC+k-n+WL)%TC<WL)
+
+-- The following function calculates the index of the "pane" currently
+-- resident in position k in the window.
+
+pane(n,k) = if k<n%WL then n-(n%WL-k) else ((k-n%WL)+n+WL)%TC
+
+-- The SEND process can then accept another input just when the value
+-- presently stored in the location where it is to go is clear (i.e., Null)
+
+-- It will accept any acknowledgement, and if it has any unacknowledged
+-- values in its windows it can send any of them.
+
+SEND(vs,n) =  (nth(n%WL,vs)==Null & left?x ->
+                  SEND(update(vs,n%WL,x),(n+1)%TC))
+             [] d?ack -> (if inrange(n,ack) then SEND(update(vs,ack%WL,Null),n)
+					   else SEND(vs,n))
+             [] (let fullpanes = {(nth(i,vs),pane(n,i)) | 
+				   i<-{0..(WL-1)}, nth(i,vs) != Null}
+		 within
+		 if fullpanes !={} then 
+		    (|~| (x,tag):fullpanes @ a!tag!x -> SEND(vs,n))
+		    else STOP)
+
+-- The parameter n of the RCVR process is the next value it expects to
+-- output.  Therefore its current window of relevant indexes is from
+-- n through to (n+WL-1)%TC (the opposite of the SEND process).  
+-- The receipt of a value with this tag forces the process to output
+-- all those it is now able to
+          
+RCVR(vs,n) = b?tag?data -> 
+              if tag==n then OUTPUT(update(vs,tag%WL,data),n,n) 
+	                else c!tag -> if not inrange(n,tag) then
+                                       RCVR(update(vs,tag%WL,data),n)
+		        		    else RCVR(vs,n)
+OUTPUT(vs,n,m) = let v=nth(m%WL,vs) within
+                 if v==Null then c!n -> RCVR(vs,m)
+		 else right!v -> OUTPUT(update(vs,m%WL,Null),n,(m+1)%TC)
+
+SENDER = normal(SEND(Nulls,0))
+
+RECEIVER = RCVR(Nulls,0)
+
+Nulls = <Null | i <- <0..WL-1>>
+
+SysStruct = <<(SENDER,{|left,a,d|}),(E,{|a,b,error1|})>,
+             <(F,{|c,d,error2|}),(RECEIVER,{|b,c,right|})>>
+
+IEvs = {|a,b,c,d|}
+
+RawSYSTEME = (ListPar(concat(SysStruct)))\IEvs
+SYSTEME = StructuredCompress(compress)(SysStruct)(IEvs)
+SYSTEMA = StructuredMixedAbs(compress)(SysStruct)(union(ERROR,IEvs),IEvs)
+
+--The nondeterminism in the medium processes seems to mean that normalisation
+--does not work well in this process.  The in such cases you are normally
+--best advised to use the combination of diamond and sbisim:
+
+compress(P) = sbisim(diamond(P))
+--compress(P) = normal(P)
+
+-- The following specification states that 
+-- (i) The traces of SYSTEM, except for the explicit error events
+--     are ones of SPEC, and
+
+-- (ii) If ever errors are held off for sufficiently long, the failures
+--      also respect SPEC.  It is possible to quantify this in timed
+--      variants.
+
+ERROR = {error1,error2}
+
+assert SPEC [F= SYSTEMA
+
+-- divergence-freedom (except for divergences with infinite error content)
+-- is verified by
+
+assert SYSTEME :[livelock free]
+
+-- We can compare the state-space size of the uncompressed system:
+
+assert RawSYSTEME :[deadlock free [F]]
+
+-- and the effect of being able to eliminate all external events in
+-- a deadlock check (note the lazy abstraction of the error events here:
+-- we would not want our system to rely on error events to avoid deadlock!
+
+DFSys = StructuredMixedAbs(compress)(SysStruct)(Events,diff(Events,ERROR))
+
+assert DFSys :[deadlock free [F]]
+

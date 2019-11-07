@@ -1,0 +1,55 @@
+
+
+-- tree2.csp
+-- eliminating strong conflict
+-- For Section 4.2.1 of Understanding concurrent systems
+
+T = {0} -- type of things passed along channels
+          -- for the purpose of deadlock, T={0} is sufficient.
+
+-- Building a tree
+
+N = 5 -- number of nodes
+
+Node = {0..N-1}
+
+Edges = {{0,1}, {0,2}, {0,3}, {1,4}}
+
+nbrs(r) = {j | j <- Node, member({j,r},Edges)}
+
+Component(i,j) = let delta(X) = {k | k <- diff(Node,union({j},X)),
+                                     card(inter(Edges,{{k,l}| l <- X}))>0}
+                     close(X) = if card(delta(X))==0 then X
+                                else close(union(X,delta(X)))
+                     within close({i})
+
+next(i,n) = let {j} = {k | k <- nbrs(i), member(n,Component(k,i))}
+            within j  
+            
+------------------------------------
+                    
+
+
+channel send, receive:Node.Node.T
+
+nametype packet = (Node,Node,T)
+
+channel pass,swap:Node.Node.packet
+
+NodeE2(i) = send.i?m?x -> NodeF2(i,(i,m,x))
+       [] pass?j:nbrs(i)!i?p -> NodeF2(i,p)
+
+NodeF2(i,(s,r,m)) = if i==r then receive.i.s.m -> NodeE2(i)
+                else (pass.i.next(i,r).(s,r,m) -> NodeE2(i)
+                      [] swap.i.next(i,r).(s,r,m) ->  
+                         swap.next(i,r).i?(s',r',m') ->  NodeF2(i,(s',r',m'))
+                      [] swap.next(i,r).i?(s',r',m') ->  
+                         swap.i.next(i,r).(s,r,m) ->  NodeF2(i,(s',r',m')))
+
+A(i) = union({|pass.i.j, pass.j.i, swap.i.j, swap.j.i | j <- nbrs(i) |},
+             {| send.i, receive.i|})
+
+Tree = || i:Node @ [A(i)] NodeE2(i)
+
+assert Tree :[deadlock free]
+

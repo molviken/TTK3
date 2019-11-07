@@ -1,0 +1,110 @@
+-- angel.csp
+-- Bill Roscoe, July 2010
+-- Angelic choice as an example of a CSP-like operator
+
+-- Taken from Section 9.4 of UCS.
+
+-- Like that, this version uses the throw operator [|A|> to manage
+-- termination.  An alternative version which guides all the
+-- components to a graceful termination when necessary can be found 
+-- in angel2.csp
+
+channel a,b,c  -- basic events for processes to use
+
+Sigma = {a,b,c}
+
+channel tau
+channel tick, tick1, tick2 -- events to regulate termination
+
+Lane = {1,2}  -- used to structure events
+datatype Status = V | H  -- visible or hidden events
+
+channel ev:Sigma.Lane.Status
+
+-- Here is the regulator process as set out in the book
+
+Reg = ev?x!1!V -> Reg1(<x>)
+     [] ev?x!2!V -> Reg2(<x>)
+     [] tick1 -> tick -> STOP
+     [] tick2 -> tick -> STOP
+
+Reg1(<y>^s) = ev?x!1!V -> Reg1(<y>^s^<x>)
+             [] ev!y!2!H -> (if s==<> then Reg else Reg1(s))
+             [] tick1 -> tick -> STOP
+             [] tick2 -> Reg1'
+
+Reg1' = ev?x!1!V -> Reg1'
+        [] tick1 -> tick -> STOP
+
+
+Reg2(<y>^s) = ev?x!2!V -> Reg2(<y>^s^<x>)
+             [] ev!y!1!H -> (if s==<> then Reg else Reg2(s))
+             [] tick2 -> tick -> STOP
+             [] tick1 -> Reg2'
+
+Reg2' = ev?x!2!V -> Reg2'
+        [] tick1 -> tick -> STOP
+
+ER(i,P) = P[[x <- ev.x.i.V, x <- ev.x.i.H | x <- Sigma]]
+
+CR(P) = P[[ev.x.i.V <- x, ev.x.i.H <- tau | x <- Sigma, i<-Lane]]
+         [[tick1 <- tau, tick2 <- tau, tick <- tau]]
+
+angelic(P,Q) = CR((ER(1,(P;tick1 -> STOP))|||ER(2,(Q;tick2 -> STOP)))
+                  [|{|ev,tick1,tick2|}|]
+                  Reg)\{tau}
+
+-- The problem with this is that  Reg is infinite state because of the
+-- unbounded sequences it has.
+
+-- We can create a bounded version of this that works for processes
+-- whose traces are never longer than that bound: 
+
+Bd = 5
+
+BReg = ev?x!1!V -> BReg1(<x>)
+     [] ev?x!2!V -> BReg2(<x>)
+     [] tick1 -> tick -> STOP
+     [] tick2 -> tick -> STOP
+
+BReg1(<y>^s) = #s < Bd-1 & ev?x!1!V -> BReg1(<y>^s^<x>)
+             [] ev!y!2!H -> (if s==<> then BReg else BReg1(s))
+             [] tick1 -> tick -> STOP
+             [] tick2 -> BReg1'
+
+BReg1' = ev?x!1!V -> BReg1'
+        [] tick1 -> tick -> STOP
+
+
+BReg2(<y>^s) = (#s < Bd-1 & ev?x!2!V -> BReg2(<y>^s^<x>))
+             [] ev!y!1!H -> (if s==<> then BReg else BReg2(s))
+             [] tick2 -> tick -> STOP
+             [] tick1 -> BReg2'
+
+BReg2' = ev?x!2!V -> BReg2'
+        [] tick1 -> tick -> STOP
+
+
+bangelic(P,Q) = CR(((ER(1,(P;tick1 -> STOP))|||ER(2,(Q;tick2 -> STOP)))
+                  [|{|ev,tick1,tick2|}|]
+                  BReg)
+                  [|{tick}|> SKIP)\{tau}
+
+-- Some processes to try this on
+
+A = a -> a -> b -> SKIP
+B = a -> a -> a -> STOP 
+C = a -> a -> a -> c -> STOP 
+
+assert bangelic(bangelic(A,B),C) :[deterministic]
+assert bangelic(bangelic(C,B),A) :[deterministic]
+
+-- How the angelic choice should behave
+
+ABC = a -> a -> (a -> c -> STOP [] b -> SKIP)
+
+assert ABC [FD=  bangelic(bangelic(A,B),C) 
+
+-- Question: how does bangelic behave when the object processes have
+-- traces longer than bd?  Do you think you could improve on this?
+

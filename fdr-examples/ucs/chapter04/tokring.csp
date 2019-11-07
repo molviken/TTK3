@@ -1,0 +1,82 @@
+
+--Token ring from chapter 4.
+
+T={0}
+
+N=4
+tokens = 2
+
+Nodes = {0..N-1}
+
+datatype Token = Empty | Full.Packet
+
+Packet = {(a,b,m) | a <- Nodes, b <- Nodes, m <- T}
+
+channel ring:Nodes.Token
+
+channel send,receive:Nodes.Nodes.T
+
+
+NodeE(n) = ring.n.Empty ->   NodeR(n)
+           [] ring.n?Full.(a,b,m) -> NodeF(n,a,b,m)
+
+NodeR(n) = send.n?b:diff(Nodes,{n})?m  -> NodeF(n,n,b,m)
+           [] ring.(n+1)%N.Empty  -> NodeE(n)
+
+NodeF(n,a,b,m) = if b==n then receive.n.a.m  -> NodeR(n)
+                 else ring.(n+1)%N.Full.(a,b,m)  -> NodeE(n)
+
+A(n) = {|ring.n,ring.(n+1)%N,send.n,receive.n|}
+
+Init(n) = if n<tokens then NodeR(n) else NodeE(n)
+
+
+Ring = || i:Nodes @[A(i)] Init(i)
+
+Sender(n) = send.n?b!0 -> STOP
+Sender2(n) = send.n?b!0 -> send.n?b -> STOP
+
+assert Ring :[deadlock free]
+
+----------------------------------
+
+-- For Chapters 5 and 6:
+
+-- with hiding of internal actions
+
+RingH = Ring\{|ring|}
+
+-- This can diverge in the empty state:
+
+assert RingH :[divergence free]
+
+-- EXERCISE: use the combination of renaming, hding and parallel composition
+-- with a regulator to produce a version of Ring in which {|ring|} actions
+-- are hidden just when there is a message in the ring (i.e. more {|send|}
+-- than {|receive|} have occurred and prove this divergence free.
+
+-- We can examine the messages passing from N1 to N2 as follows:
+
+-- A specification: between these two points the ring acts like
+-- a buffer bounded by the number of tokens
+
+TBuff(<>) = send.N1.N2?m -> TBuff(<m>)
+
+TBuff(s^<m>) = receive.N2.N1.m -> TBuff(s)
+               [] #s<tokens-1 & (STOP |~| send.N1.N2?m' -> TBuff(<m'>^s^<m>))
+
+N1 = 1
+N2 = 3
+
+assert TBuff(<>) [T= RingH\diff({|send,receive|},{|send.N1.N2,receive.N2.N1|})
+
+-- For this specification to prove that messages are correctly
+-- delivered you should set T = {0,1}.
+
+-- EXERCISE: modify this specification so that it works over [F= to the
+-- ring as modifed by the previous exercise, with
+-- diff({|receive|},{|receive.N2.N1|}) hidden, and
+-- diff({|send|},{|send.N1.N2|}) lazily abbstracted.
+-- You will need to be careful about when you can insist on a send.N1.N2.m
+-- occurring. 
+

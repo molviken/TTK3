@@ -1,0 +1,22 @@
+ucsexamples
+
+This directory contains CSP files implementing most of the examples
+from Understanding Concurrent Systems, by Bill Roscoe, as at the book's
+publication in October 2010.
+
+They are organised by book chapter.  Note that the file compression09.csp
+of compression utilities appears in several of the chapter subdirectories,
+since it is included in several files.
+
+The primary tool they are designed for is FDR.
+
+In a few cases, for example relating to the translation of Timed CSP in
+Chapter 15 and some of the syntax for priority discussed in Chapters 14 and 20
+not all desired functionality is present in FDR at the time of writing, so
+there are no corresponding files in this release.
+
+The CSP example files for Chapters 18 and 19 are constituents of the SVA
+compiler and can be found in the separate download of SVA.
+
+Please let Bill Roscoe know if you find any errors in these files.
+

@@ -1,0 +1,27 @@
+-- dring.csp
+-- deadlocking naive ring
+-- For start of section 4.2 of Understanding concurrent systems
+
+T = {0,1} -- type of things passed along channels
+
+N = 4 -- number of nodes
+
+Node = {0..N-1}
+
+channel send, receive:Node.Node.T
+
+nametype packet = (Node,Node,T)
+
+channel ring:Node.packet
+
+D(i) = send.i?m?x -> D'(i,(i,m,x))
+       [] ring.i?p -> D'(i,p)
+
+D'(i,(s,r,m)) = if i==r then receive.i.s.m -> D(i)
+                else ring.(i+1)%N.(s,r,m) -> D(i)
+
+A(i) = {|ring.i, ring.(i+1)%N, send.i, receive.i|}
+
+Ring = || i:Node @ [A(i)] D(i)
+
+assert Ring :[deadlock free]

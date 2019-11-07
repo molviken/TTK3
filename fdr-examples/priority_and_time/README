@@ -1,0 +1,16 @@
+This directory has three subdirectories that illustrate some of the
+new functionality of FDR 2.94, specifically
+
+priority  priorityfiles
+Timed CSP tcspfiles
+
+and a specific application of both of these things to determining
+timed noninterference: tnifiles
+
+Another new feature of FDR 2.94, namely the divergence-respecting weak
+bisimulation compression wbisim, appears in a number of these files, as
+no other compression apart from strong bisimulation may be used inside the
+priority operator (and consequently in Timed CSP files.)
+
+Bill Roscoe, June 2012
+

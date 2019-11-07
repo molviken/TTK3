@@ -1,0 +1,59 @@
+-- warnsdorff.csp
+-- Bill Roscoe
+-- Applying a well-known heuristic to solving the knights tour problem
+
+-- See Section 20.1 of UCS
+
+-- This version does not take advantage of the renaming trick that
+-- allows faster compilation.  See warnsdorffren.csp.
+
+N = 8  -- Board dimension
+
+Coords = {(i,j) | i <- {0..N-1}, j <- {0..N-1}}
+
+channel move:Coords.{0..8}
+channel morethan:{0..7}
+channel done
+
+
+-- Slot process which knows whether the knight is adjacent to it or not,
+-- and when it is will only allow morethan.n events where n is greater than
+-- the number of free adjacent slots.  When it accepts a move it attaches
+-- the present number of these.
+
+PriEmpty(p,n) = n>0& move?q:adj(p)?_ -> PriEmptyA(p,n-1)
+                [] move?q:diff(Coords,union(adj(p),{p}))?_ -> PriEmpty(p,n)
+                [] morethan?_ -> PriEmpty(p,n)
+
+PriEmptyA(p,n) = move.p.n -> PriFull(p)
+                 [] move?q:diff(Coords,union(adj(p),{p}))?_ -> PriEmpty(p,n)
+                 [] morethan?_:{k | k <- {0..n-1}} -> PriEmptyA(p,n)
+
+PriFull(p) = done -> PriFull(p)
+            [] move?q:diff(Coords,{p})?_ -> PriFull(p)
+            [] morethan?_:{k | k <- {0..7}} -> PriFull(p)
+
+
+-- There are two options in the following, depending on whether we want
+-- a tour or circuit
+
+PriKnight(p,n) = n<8 & morethan.n -> PriKnight(p,n+1)
+                 [] move?q!n -> PriKnight(q,0)
+                 [] member(p,adj((0,0))) & done -> PriKnight(p,n) -- for circuit
+-- done -> PriKight(p,n)  -- for tour
+
+kndel = {(2*p,q),(p,2*q) | p <- { -1,1}, q <- { -1,1}}
+
+adj((i,j)) = inter(Coords,{(i+x,j+y) | (x,y) <- kndel})
+
+
+Init(p) = if p==(0,0) then PriFull(p)
+          else if member(p,adj((0,0))) then PriEmptyA(p,card(adj(p))-1)
+          else PriEmpty(p,card(adj(p)))
+
+Board = [|{|move,morethan,done|}|] p:Coords  @ Init(p)
+
+Puzzle =  Board [|{|move,morethan,done|}|] PriKnight((0,0),0)
+
+assert STOP [T= Puzzle\{|move,morethan|}
+

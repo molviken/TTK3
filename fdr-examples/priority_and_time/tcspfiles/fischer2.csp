@@ -1,0 +1,78 @@
+
+-- fischer2.csp
+
+-- Bill Roscoe, January 2012
+
+-- Illustrating Fischer's timed mutual exclusion protocol in Timed CSP
+-- with aggressive, symmetry-reducing, compression
+
+channel read,write:Nodes.VT
+channel css,cse:Nodes
+channel tock
+-- The two delay parameters used by all nodes:
+
+D = 2
+T = 3
+
+-- Number of nodes:
+
+N = 20 -- easily handled by this version
+
+Nodes = {1..N}
+
+-- The type of the shared variable:
+
+VT = {0..N}
+
+allzero(x) = 0
+
+Timed(allzero){
+-- A node, when it reads 0 from the variable, writes
+-- its own identity into the variable within D time units.
+-- This constraint relies on the hiding of write and maximal progress.
+
+Node(i) = [] j:{0..D} @ read.i.0 -> (WAIT(j);write.i.i -> Node2(T,i))
+
+-- It then waits at least T time units before reading the
+-- variable again.  If it reads its own value it performs
+-- its critical section and resets the variable to 0.
+
+Node2(x,i) = WAIT(x);(Node2(1,i)
+                      [>
+                      (read.i?j ->
+                      if i==j then css.i -> cse.i -> write.i.0 -> Node(i)
+                              else Node(i)))
+
+-- Helped by cutting range of writes to Var by i to the range actually used:
+
+Var(x) = read?i!x -> Var(x) [] write?i?y:{0,i} -> Var(y)
+
+-- In this version we use aggressive, symmetry-reducing compression
+-- on the set of nodes.  In particular we note that as far as nodes
+-- on the outside of the collection Var, Node(1) ... Node(r) are
+-- concerned, reading the values 1..r from Var are equivalent
+
+CSys'(n) = if n==0 then Var(0) else
+ sbisim((pri((CSys'(n-1)[|{|read.n,write.n,tock|}|]wbisim(Node(n)))\{|read.n,write.n|}))[[read.i.j <- read.i.1 | i <- {n+1..N}, j <- {1..n}]])
+
+-- both bisimulation compressions are very good at reducing the sort of
+-- symmetries that result from externally not caring which nodes are
+-- in which states, merely the count of which are in which state.
+
+-- Using sbisim here gives less good compression than wbisim in the same
+-- place, but is faster.
+
+}
+
+transparent  wbisim, sbisim
+
+-- Standard mutex specification.
+
+Mutex = css?i -> cse!i -> Mutex
+
+assert Mutex [T= pri(CSys'(N))\{tock}
+
+
+external prioritise_nocache
+pri(P) = (prioritise_nocache(P,<{},{tock}>))\{tock}
+

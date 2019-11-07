@@ -1,0 +1,54 @@
+The files in this directory are all configured using the version of 
+machine-readable CSP used by ProBE and FDR2.  At the time of writing
+Martin's deadlock checker uses the FDR1 version and will therefore not
+be able to use them.  Hopefully this situation will be corrected before
+long.  There are, however, a number of similar examples that are in the
+old syntax on the web-site associated with that tool.
+
+For that reason the main purpose of these files, aside from simply
+illustrating the CSP programs from the chapter, is to explore how
+far FDR2, with its compression functions, can stretch on the
+examples in the chapter.  For FDR does not use the methods in the
+main part of the chapter, rather as with everything else it does
+it carries out a state enumeration assisted by the compression
+routines and the abstraction mechanisms which improve the latter's
+effectiveness.
+
+In many ways the main purpose of these files is to give additional
+demonstrations of the compression functions also described in the files
+in appendixC.  It was very striking to me that in just about every
+case the methods described in Appendix C produce startlingly good
+results, even though the choice of example in Chapter 13 was in no
+way influenced by the prospects for compression.  In a perhaps
+intangible sense, there may be some relationship between the fact
+that all the deadlock-free examples in this chapter have been guided
+by sensible design rules, and this compression.  Certainly it is
+notable that the one major exception to compression working well on
+systems from Chapter 13 is the dining philosophers with butler (to
+be found in appendixC/philsc.csp), which, as pointed out in the
+chapter, does not follow the principles proposed there.
+
+Please note that if you apply the common check
+
+assert InductiveCompress(normal)(System)(Events) :[deadlock free [F]]
+
+to any System at all you are certain to end up with a one-state
+check (unless System can perform tick in which case you might get two
+states).  This is because this process can only have trace <>, the
+important question being whether that state can become stable or not.
+This does not mean that this check will always work well,
+since the intermediate processes it goes through to calculate this
+answer may be large.  In other words you should not judge the effectiveness
+of a compression strategy simply in terms of the final state space size,
+but rather in terms of overall time, space, and perhaps the total number
+of states visited in the entire strategy.
+
+ *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *  *
+
+Apart from the examples directly covered here you can many find other
+example files in which deadlock is an issue; the ones most relevant to
+this chapter are:
+
+The dining philosophers in chapter02 and appendixC
+
+The distributed database in chapter15

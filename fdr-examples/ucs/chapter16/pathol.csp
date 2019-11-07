@@ -1,0 +1,30 @@
+-- pathol.csp
+
+-- Bill Roscoe
+
+-- This is example C.1.1 from TCP, illustrating the potential for normalisation
+-- in CSP/FDR to be exponential in the number of input states.
+
+channel c:{1..20}
+
+P(N,k) = if k==0 then STOP
+         else if k==N then 
+		      (c?x:{1..N} -> P(N,0)
+		      [] c?x:{1..N} -> P(N,x)
+		      [] c?x:{1..N} -> P(N,1))
+         else c?x:{1..N} -> P(N,k+1)
+
+-- The fact that this has N+1 states is fairly obvious, but is shown by
+
+assert CHAOS(Events) [F= P(8,1)
+assert CHAOS(Events) [F= P(10,1)
+assert CHAOS(Events) [F= P(11,1)
+
+-- but the normalised size is illustrated by
+
+transparent normal
+
+assert CHAOS(Events) [F= normal(P(8,1))
+assert CHAOS(Events) [F= normal(P(10,1))
+assert CHAOS(Events) [F= normal(P(11,1))
+

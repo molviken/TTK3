@@ -1,0 +1,33 @@
+This directory contains files relating to three examples:
+
+Warnsdorff's algorithm for finding a knight's tour (in two versions).
+
+The CSP simulation of the burglar alarm statechart.
+
+The translation of the "mobile CSP" telephone exchange into regular CSP.
+
+
+
+The statechart example is as originally distributed with the paper:
+Verifying Statemate Statecharts Using CSP and FDR by A. W. Roscoe and 
+Zhenzhong Wu, In Proceedings of ICFEM 2006. 
+
+The compiler (analagous to svacomp.csp as described in Chapter 18) is
+"statechartcompiler.csp", and the burglar alarm, described in a notation
+analogous to the data-type variant of SVL, is "burglar.csp".
+
+The state chart compiler is in some ways more ambitious than SVA since it
+supports the statechart model which is substantially more complex than simple
+shared variable interaction.  However this version lacks much of the
+sophistication of the current version of SVA: a GUI, use of compression etc.
+[It does use chase to exploit the determinacy of the two-phase clocked
+model.]
+
+The author believes that statechart analysis is if anything more scalable
+than SVL analysis, since one of the basic principles of the statechart model
+is to make execution relatively deterministic.  
+
+Making this compiler more practical, as we have done recently for SVA, 
+would be an interesting project for somebody.  The author welcomes
+volunteers!
+

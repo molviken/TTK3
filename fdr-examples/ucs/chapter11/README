@@ -1,0 +1,13 @@
+Of the models described in Chapter 11, only the stable revivals model and
+the refusal testing models are implemented in FDR at the time of writing.
+Furthermore only a rather limited prioritisation mode (designed for traces
+checks of timed systems) is in place.
+
+Therefore the files in this directory are limited to revivals and to
+basic refusal testing.
+
+The latter indicates how one can create prioritised checks without
+running in a prioritised model by introducing "don't care" conditions
+into specifications in cases where priority rules have been violated.
+
+

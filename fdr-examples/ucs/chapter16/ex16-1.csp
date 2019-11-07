@@ -1,0 +1,102 @@
+-- ex16-1.csp -- The normalisation example from Example 16.1 of UCS
+
+channel a,b,c
+
+-- The example process
+
+P = a -> b -> c -> P
+
+Q = a -> (b -> STOP [] c -> Q)
+
+PQ = (P|||Q)\{c}
+
+-- A CSP representation of the LTS (whose own LTS is not completely identical thanks to P2Q1)
+
+P0Q0 = a -> P1Q0 [] a -> P0Q1
+
+P1Q0 = a -> P1Q1 [] b -> P2Q0
+
+P0Q1 = (a -> P1Q1 [] b -> P0S) [> P0Q0
+
+P2Q0 = (a -> P2Q1) [> P0Q0
+
+P1Q1 = (b -> P2Q1 [] b -> P1S) [> P1Q0
+
+P0S = a -> P1S
+
+P2Q1 = (b -> P2S) [> (P2Q0 |~| P0Q1)
+
+P1S = b -> P2S
+
+P2S = STOP [> P0S
+
+-- The following establishes equivalence in the strongest models available
+-- to us
+assert P0Q0 [R= PQ
+assert PQ [R= P0Q0
+assert P0Q0 [RD= PQ
+assert PQ [RD= P0Q0
+
+{- The translation of Figure 16.3 as an LTS is
+
+I = a -> II
+II = a -> III [] b -> IV
+III = a -> III [] b -> V
+IV = a -> VI
+V = a -> VII [] b -> VIII
+VI - a -> IX [] b -> X
+VII = a -> VII [] b -> XI
+VIII = a -> XII 
+IX = a -> IX [] b -> XI
+X = a -> VI
+XI = a -> VII [] b -> VIII
+XII = b -> VIII
+
+but this is not accurate since it ignores acceptance/refusal
+information (there being no divergence in this process)
+
+The acceptances pre-normal form is thus the following, after
+obvious simplifications, using the table of acceptances.
+-}
+
+AI = a -> AII
+AII = (a -> AIII [] b -> AIV) |~| (a -> AIII)
+AIII = (a -> AIII [] b -> AV) |~| (a -> AIII)
+AIV = a -> AVI
+AV = a -> AVII |~| b -> AVIII
+AVI = (a -> AIX [] b -> AX) |~| (a -> AIX) |~|(b -> AX)
+AVII = (a -> AIX [] b -> AXI) |~| (a -> AIX) |~| (b -> AXI)
+AVIII = a -> AXII 
+AIX = (a -> AIX [] b -> AXI) |~| (a -> AIX)
+AX = a -> AVI
+AXI = a -> AVII |~| b -> AVIII
+AXII = b -> AVIII
+
+-- The strongest model that we can form this in is
+
+assert PQ [V= AI
+assert AI [V= PQ
+
+-- The above construction uses traces-plus ideas, so we would
+-- not expect
+assert PQ [R= AI
+
+-- but a little thought suggests we can expect
+assert AI [R= PQ
+-- We can factor the system above by the equivalence relation whose
+-- non-trivial classes are {III,IX}=C1, {V,XI} = C2, {IV,X} = C3 
+
+BI = a -> BII
+BII = (a -> BC1 [] b -> BC3) |~| (a -> BC1)
+BC1 = (a -> BC1 [] b -> BC2) |~| (a -> BC1)
+BC3 = a -> BVI
+BC2 = a -> BVII |~| b -> BVIII
+BVI = (a -> BC1 [] b -> BC3) |~| (a -> BC1) |~|(b -> BC3)
+BVII = (a -> BC1 [] b -> BC2) |~| (a -> BC1) |~| (b -> BC2)
+BVIII = a -> BXII 
+BXII = b -> BVIII
+
+-- This factorisation respects all models, so we do have
+
+assert AI [R= BI
+assert BI [R= AI

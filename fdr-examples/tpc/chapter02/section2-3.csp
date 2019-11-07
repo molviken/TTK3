@@ -1,0 +1,64 @@
+-- section2-3.csp 
+
+-- illustrating interleaving
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of some of the main CSP processes in Section 2.3 of those into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE.  See also the file phils.csp, where the
+-- dining philosophers are implemented.
+
+
+channel up, down
+
+L1 = up -> down -> L1
+
+-- The best way of understanding the behaviour of interleavings of
+-- L1 is via the bounded COUNT process defined in chapter1.csp
+
+LCOUNT(N,n) = n<N & up -> LCOUNT(N,n+1)
+            [] n>0 & down -> LCOUNT(N,n-1)
+
+-- You can define processes L(n) for any n either using indexed ||| 
+
+L(n) = ||| i:{0..n-1} @ L1
+
+-- or, equivalently, inductively
+
+L'(1) = L1
+L'(n) = L1 ||| L'(n-1)
+
+-- With either of these definitions, L(n) is equivalent to LCOUNT(n,0):
+
+assert LCOUNT(10,0) [T= L(10)
+assert L'(9) [T= LCOUNT(9,0)
+
+-- though in running these checks you will notice that the version
+-- defined using interleaving has many more states.  These result from
+-- the nondeterminism about which components are "high" and which "low"
+-- at values other than 0 and N.  (In the second check the greater number
+-- shows up in FDR's normalization phase.)
+
+-- The following processes are all infinite state and therefore should
+-- be run only on ProBE:
+
+Ctr = up -> (Ctr ||| down -> STOP)
+
+Ctr' = up -> (Ctr' ||| down -> L1)
+
+Ctr'' = up -> (Ctr'' ||| down -> Ctr'')
+
+-- The same nondeterminism that increases the number of states in the L(n)
+-- processes will be experienced if you animate any of these in a way where
+-- you see multiple choices of processes after events.  As an execution
+-- proceeds (but more so with Ctr' and Ctr'') the number of options
+-- for each will tend to increase as more and more of the interleaved
+-- processes are able to take part.  
+
+-- The particular properties of these examples make the overall effects
+-- deterministic: the choices you make turn out to have no effect on the
+-- externally-visible behaviours.  However it should be obvious that in
+-- using this operator on processes with overlapping alphabets would not
+-- always leave us so lucky.

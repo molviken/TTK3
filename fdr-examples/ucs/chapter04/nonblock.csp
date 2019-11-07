@@ -1,0 +1,73 @@
+
+-- nonblock.csp
+
+--Non-blocking ring from Chapter 4.
+
+T={0}
+
+N=4
+
+Nodes = {0..N-1}
+
+Packet = {(a,b,m) | a <- Nodes, b <- Nodes, m <- T}
+
+channel ring:Nodes.Packet
+
+channel send,receive:Nodes.Nodes.T
+
+
+NodeE(n) =  ring.n?(a,b,m)  -> Node1(n,a,b,m)
+           [] send.n?b?m  ->  Node1(n,n,b,m) 
+
+Node1(n,a,b,m) =  if n==b then receive.n.a.m ->  NodeE(n)
+                  else 
+               ( 
+               ring.n?(a',b',m') -> Node2(n,a,b,m,a',b',m')
+               [] ring.(n+1)%N.(a,b,m) -> NodeE(n))
+
+Node2(n,a,b,m,a',b',m') =  ring.(n+1)%N.(a,b,m) -> Node1(n,a',b',m')
+
+
+A(n) = {|ring.n,ring.(n+1)%N,send.n,receive.n|}
+
+
+
+Ring = (|| i:Nodes @[A(i)] NodeE(i))\{|ring|}
+
+assert Ring :[deadlock free]
+
+
+
+
+
+----------------------------------
+
+-- For Chapters 5 and 6:
+
+-- with hiding of internal actions
+
+RingH = Ring\{|ring|}
+
+-- This cannot diverge at all
+
+assert RingH :[divergence free]
+
+-- We can examine the messages passing from N1 to N2 as follows:
+
+-- A specification: between these two points the ring acts like
+-- a buffer bounded by the maximum capacity of the ring:
+
+capacity = 2*N-1
+
+TBuff(<>) = send.N1.N2?m -> TBuff(<m>)
+
+TBuff(s^<m>) = receive.N2.N1.m -> TBuff(s)
+               [] #s<capacity-1 & (STOP |~| send.N1.N2?m' -> TBuff(<m'>^s^<m>))
+
+N1 = 1
+N2 = 3
+
+assert TBuff(<>) [T= RingH\diff({|send,receive|},{|send.N1.N2,receive.N2.N1|})
+
+-- For this specification to prove that messages are correctly
+-- delivered you should set T = {0,1}.

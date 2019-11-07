@@ -1,0 +1,16 @@
+This directory contains files illustrating the use of the
+Timed CSP functionality of FDR.  They are the examples
+mentioned in the paper "Model Checking Timed CSP",
+together with a simpletimed.csp, which simply
+illustrates the notation and usage, and tfr.csp, which
+implements Timed Failures refinement in terms of
+refusal testing.
+
+More examples of Timed CSP can be found in the directory
+tnifiles.
+
+They all require at least FDR 2.94, the first release to incorporate
+Timed CSP.
+
+
+

@@ -1,0 +1,270 @@
+-- Distributed database 
+
+-- Bill Roscoe, November 1996
+-- (adapted from the FDR1 file by me and Helen MacCarthy)
+
+-- This file provides an interesting example of how effective
+-- FDR's compression operators can be in improving performance on
+-- typical practical examples.
+
+include "compression.csp"
+
+-- This file illustrates the simple updates model (Algorithm 1) from
+-- my paper "maintaining consistency in distributed databases"
+-- and is the version discussed in Section 15.2.1 of my book.
+
+-- It is based on a ring of nodes, each holding a copy of a datum.
+
+-- number of nodes
+
+N = 4 
+
+-- This number is such that all the checks go through reasonably
+-- comfortably.  As they vary considerably in complexity some will
+-- go through with larger N.
+
+NodeNames = {0..N-1}
+
+-- We are illustrating the theory of data independence introduced in
+-- Section 15.2.2, and hence set up our datatypes and systems
+-- so as conveniently to examine versions with different-sized
+-- types
+
+datatype data = zero | one | two | three
+
+One = {zero}
+Two = {zero, one}
+Three = {zero, one, two}
+Four = {zero, one, two, three}
+
+-- The channels for the basic system are:
+
+channel in : NodeNames . data
+channel ring,out : NodeNames . NodeNames . data
+channel quiet
+
+limit = 2 -- the most updates we allow to be running from one source
+          -- required to make it finite state.
+
+-- The following list represents the priorties of nodes: you can
+-- set this however you like, but the following is chosen to be fairly
+-- "random".
+
+prioritylist = <(i*37)%20 | i <- <1..20>>
+
+priority(i,j) = (nth(i,prioritylist) > nth(j,prioritylist))
+
+-- The nodes behave as described in the text, and follow the principles
+-- of Deadlock Rule 8, namely never allowing input from the outside
+-- to fill up any node.  The parameter T is there to support data-independent
+-- reasoning.
+
+N0(i,E,T) = (#E<limit) & in.i?x:T -> N1(i,E^<x>,i,x,T) 
+          [] #E==0 & quiet -> N0(i,E,T)
+          [] ring.i?j?x:T -> (if #E==0 
+                          then (out.i.j!x -> N1(i,E,j,x,T))
+                          else (if i==j
+                                then N0(i,tail(E),T) 
+                                else (if priority(i,j)
+                                  then (out.i.j!x -> N1(i,<>,j,x,T))
+                                  else N0(i,E,T) )))
+
+N1(i,E,j,x,T) = ring.((i+1)%N)!j!x -> N0(i,E,T)
+             [] ring.i?k?y:T -> 
+               (if #E==0
+                then (out.i.k!y -> ring.((i+1)%N)!j!x -> N1(i,E,k,y,T) )
+                else (if k==i
+                      then N1(i,tail(E),j,x,T) 
+                      else (if priority(i,k)
+                            then (out.i.k!y -> ring.((i+1)%N)!j!x -> 
+                                  N1(i,<>,k,y,T) )
+                            else  N1(i,E,j,x,T) )))
+
+Alpha(i) = {|in.i, out.i, ring.i, ring.(i+1)%N, quiet|}
+
+-- We can define the system either conventionally
+
+RING(T) = (|| i:NodeNames @ [Alpha(i)] N0(i,<>,T))\{|ring|}
+
+-- or as a list of process/alphabet pairs to make them suitable for
+-- applying the high-level compression operators from compression.csp.
+-- Note this second form has not yet had {|ring|} hidden.
+
+ListRing(T) = <(N0(i,<>,T), Alpha(i)) | i <- <0..N-1>>
+
+-- The following process exploits data-independence to speed up 
+-- a deadlock check.  It relies on the fact that the deadlock
+-- behaviour does not depend on the values of the updates circulating
+-- (though it may on their origins).
+
+-- By the arguments in Section 15.2.2 it is sufficient, for specifications
+-- that do not specify which values in the data-independent type occur,
+-- to consider behaviour with only one value.  The conventional
+-- system we get is then
+
+assert RING(One) :[deadlock free [F]]
+
+-- The utility of compression is shown by using the most basic
+-- high-level compression function together with the fact that we
+-- can hide all events when checking for deadlock:
+
+transparent normal
+
+assert LeafCompress(normal)(ListRing(One))(Events) :[deadlock free [F]]
+
+-- One of the most important specifications of our ring is that,
+-- in the absence of further inputs of updates, will eventually become
+-- quiescent with no updates either circulating or expected back.
+-- The following uses the artificially-included event (quiet) which has
+-- something in common with the event done used in puzzle examples,
+-- since it is identifying a global state by synchronisation, to
+-- check for this: quiet must never be refused.
+
+-- The cleanest way to check this is first to check 
+
+assert (RING(One)\{|out|}) :[livelock free]
+
+-- or equivalently
+
+assert (LeafCompress(normal)(ListRing(One))({|ring,out|})) :[livelock free]
+
+-- This shows that the system cannot make infinite
+-- progress without communication on channel in, and then to prove that
+-- the abstracted process
+
+QuiescentCheck = MAbs({|in,out|},{|out|},RING(One))
+
+-- failures-refines
+
+QS = quiet -> QS
+
+assert QS [F= QuiescentCheck
+
+-- This shows that the system can never get into a non-quiescent state where
+-- it can only make progress by communicating on channel in.  In other words,
+-- whenever no further inputs are made after a given point, and outputs
+-- are allowed,  the system will eventually stabilize (which we know will
+-- happen by the livelock checks above) in a state offering quiet.  MAbs
+-- is the mixed abstraction function described in chapter 12.
+
+MAbs(X,Y,P) = let Delays = diff(X,Y)
+              within
+	      (P[|Delays|]CHAOS(Delays))\X
+
+-- The corresponding compressed check uses a generalized version of the
+-- leaf compression function:
+
+QuiescentCheck' = 
+MixedAbsLeafCompress(normal)(ListRing(One))({|in,out,ring|},{|out,ring|})
+
+assert QS [F= QuiescentCheck'
+
+--~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~~^~
+
+-- That is all we want to establish about liveness properties.  So we can
+-- now turn to proving that the database never gets inconsistent.  Specifically
+-- we want to show that whenever the ring is quiescent then all nodes agree
+-- on the value of the register.
+
+-- We can do this by adding register processes to hold the value at each node:
+
+channel read:NodeNames.data
+
+VAR(i,x,T) = (out.i?j?v:T -> VAR(i,v,T))
+           [] (in.i?v:T -> VAR(i,v,T))
+           [] read.i.x -> VAR(i,x,T)
+
+VARS(T,x0) = ||| i:NodeNames @ VAR(i,x0,T)
+
+-- The above are a system or registers for the data-values at the various
+-- nodes, and the system below is the result of combining them with the ring.
+
+RV(T,x0) = (RING(T) [|{|in,out|}|] VARS(T,x0))\{|out|}
+
+-- Obviously we need an initial consistent value for our registers.
+-- In order to use the theorems about data independence we need to
+-- initialize it neutrally, though with care it would be able to argue
+-- this was not necessary.
+
+channel init:data
+
+WithVars(T) = init?x0:T -> RV(T,x0)
+
+
+-- SS represents, as a trace specification, the coherence behaviour we
+-- want (when quiescent, all equal).   
+
+SS =  quiet -> Q0 [] ([]a:(diff(Events,{quiet})) @ a -> SS)
+
+Q0 =   read?j.x -> Q1(x)
+    [] quiet -> Q0
+    [] ([]a:(diff(Events,{|quiet,read|})) @ a -> SS)
+
+Q1(x) =  read?k!x ->  Q1(x) 
+      [] quiet -> Q0 
+      [] ([]a:(diff(Events,{|quiet,read|})) @ a -> SS)
+
+assert init?x:Two -> SS [T= WithVars(Two)
+
+-- In the text it is briefly stated that it is sufficient to consider
+-- the case where all but perhaps one of the input values is sufficient.
+-- This applies in the present case; you can find detailed justification
+-- in some of Lazic's work cited in the text.
+
+
+OneOne = in?i!one -> Zeros 
+      [] in?i!zero -> OneOne	      
+      [] init.zero -> OneOne
+      [] init.one -> Zeros
+
+
+Zeros = in?i!zero -> Zeros
+
+-- WithVars with this restriction is 
+
+WVDI = WithVars(Two)[|{|in,init|}|]OneOne
+
+-- so an equivalent but more efficient check is
+       
+assert init?x:Two -> SS [T= WVDI
+
+-- We haven't configured a version of these checks with compression.
+-- You can get some improvement by compressing the interactions between
+-- a N0 and its register:
+
+node(i,x,T) = normal((N0(i,<>,T) [|{|in,out|}|] VAR(i,x,T))\{|out|})
+
+-- but I will not take this further here.
+
+--!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!!|!
+
+-- Alternative specification
+
+-- Rather than prove direct coherence as above we can specify the
+-- behaviour we might expect of RING to make it work in the context
+-- of updating VAR's.  The specification keeps values 
+-- for all four copies, and bans quiet unless all four are equal.
+
+RS(T) = Q(<zero | i <- <0..N-1>>,T)
+
+
+Q(vs,T) = allequal(vs) & quiet -> Q(vs,T)
+        [] in?i?v:T -> Q(update(vs,i,v),T)
+        [] out?i?j?v:T -> Q(update(vs,i,v),T)
+
+
+allequal(vs) = allequalto(head(vs),tail(vs))
+
+allequalto(x,xs) = if xs==<> then true
+                             else head(xs)==x and allequalto(x,tail(xs))
+
+update(vs,i,v) = if i==0 then <v>^tail(vs)
+                         else <head(vs)>^update(tail(vs),i-1,v)
+
+-- Here one should TRACE check RING(Two) against RS(Two).
+
+assert RS(Two) [T= RING(Two) 
+
+assert RS(Two) [T= RING(Two) [|{|in,init|}|] OneOne
+
+

@@ -1,0 +1,170 @@
+-- Introducing FDR3.0
+-- Bill Roscoe, November 2013
+
+-- A file to illustrate the functionality of FDR3.0.
+
+-- Note that this file is necessarily basic and does not stretch the
+-- capabilities of the tool.
+
+-- To run FDR3 with this file just type "fdr3 intro.csp" in the directory
+-- containing intro.csp, assuming that fdr3 is in your $PATH or has been aliased
+-- to run the tool.
+
+-- Alternatively run FDR3 and enter the command ":load intro.csp".
+
+-- You will see that all the assertions included in this file appear on the RHS
+-- of the window as prompts. This allows you to run them.
+
+-- This file contains some examples based on playing a game of tennis between A
+-- and B.
+
+channel pointA, pointB, gameA, gameB
+
+Scorepairs = {(x,y) | x  <- {0,15,30,40}, y <- {0,15,30,40}, (x,y) != (40,40)}
+
+datatype scores = NUM.Scorepairs | Deuce | AdvantageA | AdvantageB
+
+Game(p) = pointA -> IncA(p)
+         [] pointB -> IncB(p)
+
+IncA(AdvantageA) = gameA -> Game(NUM.(0,0))
+IncA(NUM.(40,_)) = gameA -> Game(NUM.(0,0))
+IncA(AdvantageB) = Game(Deuce)
+IncA(Deuce) = Game(AdvantageA)
+IncA(NUM.(30,40)) = Game(Deuce)
+IncA(NUM.(x,y)) =  Game(NUM.(next(x),y))
+IncB(AdvantageB) = gameB -> Game(NUM.(0,0))
+IncB(NUM.(_,40)) = gameB -> Game(NUM.(0,0))
+IncB(AdvantageA) = Game(Deuce)
+IncB(Deuce) = Game(AdvantageB)
+IncB(NUM.(40,30)) = Game(Deuce)
+IncB(NUM.(x,y)) = Game(NUM.(x,next(y)))
+-- If you uncomment the following line it will introduce a type error to
+-- illustrate the typechecker.
+-- IncB((x,y)) = Game(NUM.(next(x),y))
+
+next(0) = 15
+next(15) = 30
+next(30) = 40
+
+-- Note that you can check on non-process functions you have written. Try typing
+-- next(15) at the command prompt of FDR3.
+
+-- Game(NUM.(0,0)) thus represents a game which records when A and B win
+-- successive games, we can abbreviate it as
+
+Scorer = Game(NUM.(0,0))
+
+-- Type ":probe Scorer" to animate this process.    
+-- Type ":graph Scorer" to show the transition system of this process
+
+-- We can compare this process with some others:
+
+assert Scorer [T= STOP
+assert Scorer [F= Scorer
+assert STOP [T= Scorer
+
+-- The results of all these are all obvious.
+
+-- Also, compare the states of this process
+
+assert Scorer [T= Game(NUM.(15,0))
+assert Game(NUM.(30,30)) [FD=  Game(Deuce)
+
+-- The second of these gives a result you might not expect: can you explain why?
+-- (Answer below....)
+
+-- For the checks that fail, you can run the debugger, which illustrates why the
+-- given implementation (right-hand side) of the check can behave in a way that
+-- the specification (LHS) cannot.  Because the examples so far are all
+-- sequential processes, you cannot subdivide the implementation behaviours into
+-- sub-behaviours within the debugger.
+
+-- One way of imagining the above process is as a scorer (hence the name) that
+-- keeps track of the results of the points that A and B score.  We could put a
+-- choice mechanism in parallel: the most obvious picks the winner of each point
+-- nondeterministically:
+
+ND = pointA -> ND |~| pointB -> ND
+
+-- We can imagine one where B gets at least one point every time A gets one:
+
+Bgood = pointA -> pointB -> Bgood |~| pointB -> Bgood
+
+-- and one where B gets two points for every two that A get, so allowing A to
+-- get two consecutive points:
+
+Bg = pointA -> Bg1 |~| pointB -> Bg
+
+Bg1 = pointA -> pointB ->  Bg1 |~| pointB -> Bg
+
+assert Bg [FD= Bgood 
+assert Bgood [FD= Bg 
+
+-- We might ask what effect these choice mechanisms have on our game of tennis:
+-- do you think that B can win a game in these two cases?
+
+BgoodS = Bgood [|{pointA,pointB}|] Scorer
+BgS = Bg [|{pointA,pointB}|] Scorer
+
+assert STOP [T= BgoodS \diff(Events,{gameA})
+assert STOP [T= BgS \diff(Events,{gameA})
+
+-- You will find that A can in the second case, and in fact can win the very
+-- first game.  You can now see how the debugger explains the behaviours inside
+-- hiding and of different parallel components.
+
+-- Do you think that in this case A can ever get two games ahead?  In order to
+-- avoid an infinite-state specification, the following one actually says that A
+-- can't get two games ahead when it has never been as many as 6 games behind:
+
+Level = gameA -> Awinning(1)
+        [] gameB -> Bwinning(1)
+
+Awinning(1) = gameB -> Level -- A not permitted to win here
+
+Bwinning(6) = gameA -> Bwinning(6) [] gameB -> Bwinning(6)
+Bwinning(1) = gameA -> Level [] gameB -> Bwinning(2)
+Bwinning(n) = gameA -> Bwinning(n-1) [] gameB -> Bwinning(n+1)
+
+assert Level [T= BgS \{pointA,pointB}
+
+-- Exercise for the interested: see how this result is affected by changing Bg
+-- to become yet more liberal. Try Bgn(n) as n copies of Bgood in ||| parallel.
+
+-- Games of tennis can of course go on for ever, as is illustrated by the check
+
+assert BgS\{pointA,pointB} :[divergence-free]
+
+-- Notice that here, for the infinite behaviour that is a divergence, the
+-- debugger shows you a loop.
+
+-- Finally, the answer to the question above about the similarity of
+-- Game(NUM.(30,30)) and Game(Deuce).
+
+-- Intuitively these processes represent different states in the game: notice
+-- that 4 points have occurred in the first and at least 6 in the second. But
+-- actually the meaning (semantics) of a state only depend on behaviour going
+-- forward, and both 30-all and deuce are scores from which A or B win just when
+-- they get two points ahead.  So these states are, in our formulation,
+-- equivalent processes.
+
+-- FDR has compression functions that try to cut the number of states of
+-- processes: read the books for why this is a good idea. Perhaps the simplest
+-- compression is strong bisimulation, and you can see the effect of this by
+-- comparing the graphs of Scorer and
+
+transparent sbisim, wbisim, diamond
+
+BScorer = sbisim(Scorer)
+
+-- Note that FDR automatically applies bisimulation in various places.
+
+-- To see how effective compressions can sometimes be, but that
+-- sometimes one compression is better than another compare 
+
+NDS = (ND [|{pointA,pointB}|] Scorer)\{pointA,pointB}
+
+wbNDS = wbisim(NDS)
+sbNDS = sbisim(NDS)
+nNDS = sbisim(diamond(NDS))

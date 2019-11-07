@@ -1,0 +1,290 @@
+-- fullabs.csp
+
+-- Illustrating full abstraction results for CSP
+
+-- Part 2: discriminating via testing
+
+-- Bill Roscoe
+
+-- This file, and its companion,
+-- illustrate the constructions used in Section 9.3 on
+-- expressibility and full abstraction for CSP.  The concepts
+-- illustrated are sophisticated and remote from direct practical
+-- applications.  You are strongly advised not to try to follow these
+-- files without studying the relevant section of the book!
+
+-- BASICS
+
+-- For simplicity and efficiency, we will deal only with the
+-- case of a small fixed alphabet
+
+channel a,b,c,fail,tick
+
+-- The role of the event fail will be as in the text.
+
+-- It is not permitted to refer to the actual tick event of CSP (written
+-- as _tick when you see it in debuggers, etc) in
+-- CSP scripts (because of the special role it has, only introduced via
+-- SKIP), but we do need a way of referring to it in the semantic values
+-- we manipulate in this script.  Therefore the declared event tick
+-- is included so we can handle semantic objects involving it.  The
+-- intention is that when it comes to mapping one of these (say the trace
+-- <a,tick>) to a real CSP process, that the corresponding behaviour of
+-- that process would replace all tick's by the "real" event _tick
+-- (i.e, this trace would become <a,_tick>).
+
+-- The automatically-supported set Events equals {a,b,c,fail,tick}, of
+-- course, but at the modelling level we want a set of communications
+-- that doesn't include tick as an ordinary one
+
+Sigma = diff(Events,{tick})
+
+-- and an augmented one that does:
+
+Sigmatick = Events
+
+-- so the range of possible refusal sets (at the modelling level) is
+
+RefSets = Set(Sigmatick)
+
+--^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-
+
+-- DISCRIMINATING PROCESSES
+
+-- The objective here is to show how simple tests can be used to
+-- discriminate between any two processes that are not equivalent
+-- in a given semantic model.
+
+-- Traces model
+
+-- What we do here is to show that any pair of processes with different
+-- sets of traces are distinguished by some context relative to the
+-- tests T1 failed when the process has the trace <fail>.
+
+-- We can test for this property by seeing if our process trace-refines:
+
+Test1 = ([] x:diff(Events,{fail}) @ x -> BotTM)
+        |~| SKIP
+
+BotTM = ([] x:Events @ x -> BotTM)
+        |~| SKIP
+
+-- The context that checks for a given trace using this test is
+
+CT(s^<tick>,P) = ((TT(s^<tick>)[|Events|]P)\Events); fail -> STOP
+
+CT(s,P) = (((TT(s)[|Events|]P)[[x <- a | x <- Events]])
+           [|{a}|]
+	   FAIL(#s))\{a}
+
+-- Where
+-- A process that performs any given trace
+
+TT(<>) = STOP
+
+TT(<tick>) = SKIP
+
+TT(<x>^s) = x -> TT(s)
+
+FAIL(0) = fail -> STOP
+FAIL(n) = a -> FAIL(n-1)
+
+-- So for example the process
+
+Q1 = ||| i:{1..3} @ a -> b -> a -> SKIP
+
+-- has the trace <a,a,a,b,b,b,a,a,a> but not <a,a,a,b,a,a,a> so that
+
+assert Test1 [T= CT(<a,a,a,b,b,b,a,a,a>,Q1)
+
+-- fails but not
+
+assert Test1 [T= CT(<a,a,a,b,a,a,a>,Q1)
+
+-- similarly it fails
+
+assert Test1 [T= CT(<a,a,b,a,b,a,b,a,a,tick>,Q1)
+
+-- but not 
+
+assert Test1 [T= CT(<a,a,a,b,a,a,b,b,a,tick>,Q1)
+
+---+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+-
+
+-- Stable failures model
+
+-- The simply divergent process plays an important role in the
+-- constructions for this model
+
+DIV = SKIP;DIV
+
+-- The test for this model is that our process cannot deadlock
+-- immediately and doesn't have the trace <fail>.  We can pick this
+-- up via refinement of the process
+
+Test2 = (|~| x:diff(Events,{fail}) @ x -> BotSFM)
+        |~| SKIP
+
+BotSFM = ([] x:Events @ x -> BotSFM)
+         |~| SKIP
+	 |~| STOP
+
+-- We can test for occurrences of trace s wrt this test via the
+-- context
+
+CT'(s,P) = CT(s,P) ||| DIV
+
+-- which never deadlocks because it never becomes stable.
+
+-- As discussed in the text, it is sufficient thanks to the axioms to
+-- use the above and a context that can detect a failure (s,X) where
+-- s does not contain tick and X does:
+
+CF(s,X,P) = ((P;DIV)[|Events|]FF(s,diff(Sigmatick,X)))\Events
+
+-- Looking back to the example Q1, we can thus find that it has both
+-- the trace <a,b,a,b>
+
+assert Test2 [F= CT'(<a,b,a,b>,Q1)
+
+-- and the failure (<a,b,a>,{b,tick})
+
+assert Test2 [F= CF(<a,b,a>,{b,tick},Q1)
+
+-- but not the failure (<a,b,a,a>,{b,tick})
+
+assert Test2 [F= CF(<a,b,a,a>,{b,tick},Q1)
+
+--<+><+><+><+><+><+><+><+><+><+><+><+><+><+><+><+><+><+><+><+><+><+><+><+><+>
+
+-- Failures/divergences model
+
+-- The test here is that the process neither deadlocks nor diverges immediately,
+-- which we can tell by FD-refinement of the process
+
+Test3 = (|~| x:Events @ x -> DIV)
+        |~| SKIP
+
+-- Here we can detect divergence on the trace s (not including tick, which
+-- is sufficient by D3) by the context
+
+CD(s,P) = ((P[|Events|]TT(s))\Events)||| a -> STOP
+
+-- the presence of a trace ending in tick
+
+CT''(s^<tick>,P) = (((P[|Events|]TT(s^<tick>))\Events);DIV)||| a -> STOP
+
+-- and of others
+
+CT''(s,P) = ((P[|Events|]TT''(s))\Events)||| a -> STOP
+
+TT''(<>) = DIV
+TT''(<x>^s) = x -> TT''(s)
+
+-- the ||| a -> STOP clause is simply there to prevent the context failing
+-- Test3 by deadlock: it can only fail by divergence.
+
+-- The creation of contexts for failures (s,X) (where again tick is in X
+-- but not in s) is in several stages:
+
+-- First a process that can only deadlock after s if P has the failure (s,X)
+
+CF1(s,{tick},P) = (P [|Events|] TT(s^<tick>));(a -> STOP) 
+
+CF1(s,X,P) = let A = diff(Sigma,X)
+                AS = []x:A @ a -> AS
+	     within
+                 ((P;AS) [|Events|] FF'(s,A))
+
+-- The above is slightly modified from the book to avoid choosing a member of
+-- a set.
+
+FF'(<>,X) = [] x:diff(Sigma,X) @ x -> STOP
+
+FF'(<x>^s,X) = x -> FF'(s,X)
+
+-- And now checking for the presence of that deadlock:
+
+CFD(s,X,P) = (CF1(s,X,P)[[x <- b | x <- Events]] [|{b}|] W(#s))\{b}
+
+W(0) = b -> CS
+W(n) = (b -> W(n-1)) [] CS
+CS = c -> CS
+
+-- We can repeat the tests we did over the stable failures model:
+-- so that the following two fail Test3
+
+assert Test3 [FD= CT''(<a,b,a,b>,Q1)
+
+assert Test3 [FD= CFD(<a,b,a>,{b,tick},Q1)
+
+-- but not 
+
+assert Test3 [FD= CFD(<a,b,a,a>,{b,tick},Q1)
+
+-- The divergence of 
+
+Q2 = (a -> b -> DIV)
+   [] (b -> Q2)
+
+-- after <b,b,a,b> but not after <b,b,b,a> is demonstrated
+
+assert Test3 [FD= CD(<b,b,a,b>,Q2)
+assert Test3 [FD= CD(<b,b,b,a>,Q2)
+
+--=|==|==|==|==|==|==|==|==|==|==|==|==|==|==|==|==|==|==|==|==|==|==|==|==|=
+
+-- A few definitions from express.csp that are used above
+
+TT'(<>) = DIV
+
+TT'(<tick>) = SKIP
+TT'(<x>^s) = DIV [] x -> TT'(s)
+
+
+FF(<>,X) = [] x:diff(Sigma,X) @ x -> DIV
+FF(<x>^s,X) = DIV[] x -> FF(s,X)
+
+
+--/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\/!\
+
+-- CAVEAT
+
+-- At the time of writing, the semantics of termination in FDR does not
+-- exactly coincide with that in the book.  Specifically, it does not
+-- adopt the principle enshrined in axiom F4 that a terminating process
+-- can refuse any other event.   This virtually never impacts on sensible
+-- examples, because one never writes processes of the form SKIP [] P.
+
+-- In the present file we are concerned with the fine-grain structure of
+-- semantic models, however, and need to be able to handle all processes,
+-- even SKIP [] P, properly.
+
+-- In order to force FDR to conform to the semantics in the book we can,
+-- however, use the operator when (rarely) you get one of these cases.
+
+fixtick(P) = P;SKIP
+
+-- Its job is to take a process P and produce one whose behaviour as
+-- observed by
+-- FDR is identical to that predicted for P by the book.  Any ticks within
+-- P are turned into taus followed by ticks in the sense discussed in
+-- connection with Figure 7.2.  The operator fixtick is, of course,
+-- an identity operator in the semantics discussed in the book, so while
+-- it may clutter definitions up it can do no harm to leave it in if the
+-- semantics of FDR are subsequently changed to coincide with the book.
+
+-- For example, the refinement
+
+assert (a -> STOP) [] SKIP [FD= SKIP
+
+-- predicted by the book may not hold, but
+
+assert fixtick((a -> STOP) [] SKIP) [FD= SKIP
+
+-- certainly will.
+
+-- The consequence for this file is that on processes with external choice
+-- between SKIP and something else you will not always get the expected
+-- answers to tests on P, but should for fixtick(P).
+

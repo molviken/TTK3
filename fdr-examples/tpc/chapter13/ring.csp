@@ -1,0 +1,76 @@
+-- ring.csp
+
+-- Deadlock-free messae passing ring
+
+-- Bill Roscoe
+
+-- This illustrates Example 13.2.5, again in a data-free way.
+
+include "compression.csp"
+transparent normal
+transparent diamond, sbisim
+
+channel ring,in,out:{0..100}
+
+-- The deadlock of the simple version at the start of the example is
+-- illustrated:
+
+D1(N,i) = in.i -> D1'(N,i)
+      [] ring.i -> D1'(N,i)
+
+D1'(N,i) = out.i -> D1(N,i)
+      |~| ring.(i+1)%N -> D1(N,i)
+
+Alpha(N,i) = {in.i,out.i,ring.i,ring.(i+1)%N}
+
+D1Ring(N) = <(D1(N,i),Alpha(N,i)) | i <- <0..N-1>>
+
+assert LeafCompress(normal)(D1Ring(20))(Events) :[deadlock free [F]]
+
+-- The inadequacy of simply adding further buffering is illustrated
+-- by the following example, where each node has two spaces...
+
+D2(N,i) = in.i -> D2'(N,i)
+      [] ring.i -> D2'(N,i)
+
+D2'(N,i) = (out.i -> D2(N,i)
+           |~| ring.(i+1)%N -> D2(N,i))
+	   []
+	   (in.i -> D2''(N,i)
+	   [] ring.i -> D2''(N,i))
+
+
+D2''(N,i) = (out.i -> D2'(N,i)
+           |~| ring.(i+1)%N -> D2'(N,i))
+
+
+D2Ring(N) = <(D2(N,i),Alpha(N,i)) | i <- <0..N-1>>
+
+assert LeafCompress(normal)(D2Ring(20))(Events) :[deadlock free [F]]
+
+-- The example from the chapter in which the external user cannot fill
+-- up a node is described:
+
+DFN(N,i) = in.i -> DFN'(N,i)
+      [] ring.i -> DFN'(N,i)
+
+DFN'(N,i) = (out.i -> DFN(N,i)
+           |~| ring.(i+1)%N -> DFN(N,i))
+	   []
+	   (ring.i -> DFN''(N,i))
+
+
+DFN''(N,i) = (out.i -> DFN'(N,i)
+           |~| ring.(i+1)%N -> DFN'(N,i))
+
+DFRing(N) = <(DFN(N,i),Alpha(N,i)) | i <- <0..N-1>>
+
+-- This does not collapse down quite as well under leaf compression,
+-- as it still has 2^N states:
+
+assert LeafCompress(normal)(DFRing(10))(Events) :[deadlock free [F]]
+
+-- However, under inductive compression .....
+
+assert InductiveCompress(normal)(DFRing(10))(Events) :[deadlock free [F]]
+assert InductiveCompress(normal)(DFRing(50))(Events) :[deadlock free [F]]

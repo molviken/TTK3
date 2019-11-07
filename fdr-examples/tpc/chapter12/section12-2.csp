@@ -1,0 +1,49 @@
+-- section12-2.csp 
+
+-- abstraction for sub-alphabet specifications
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of some of the CSP processes in Section 12.2 into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE.  
+
+-- You can find many examples of the use of hiding for establishing
+-- trace sub-alphabet specifications in other files, and of the
+-- role of hiding in deadlock checking.  Another example of the use
+-- of lazy/mixed abstraction in dealing with more general failures
+-- specifications can be found in appendixC/scheduler.csp
+
+--#+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+#
+
+-- First, a pair of functions implementing the stable-failures implementations
+-- of lazy and mixed abstraction
+
+LAbs(X)(P) = (P [|X|] CHAOS(X))\X
+
+MAbs(X,Y)(P) = let hdelay = diff(X,Y) within
+               (P [|hdelay|] CHAOS(hdelay))\X
+
+-- Token ring:
+
+N = 20
+
+channel ring,start_cr,end_cr:{0..N-1}
+
+Empty(i) = ring.i -> Full(i)
+
+Full(i) = ring.(i+1)%N -> Empty(i)
+       [] start_cr.i -> end_cr.i -> Full(i)
+
+Alpha(i) = {ring.i,ring.(i+1)%N,start_cr.i,end_cr.i}
+
+Ring = || i:{0..N-1} @ [Alpha(i)] (if i==0 then Full(i) else Empty(i))
+
+Spec = |~| i:{0..N-1} @ start_cr.i -> end_cr.i -> Spec
+
+-- So the specification that there is always either one node in a
+-- critical region or there is one node permitted to begin one is
+-- checked:
+
+assert Spec [F= LAbs({|ring|})(Ring)

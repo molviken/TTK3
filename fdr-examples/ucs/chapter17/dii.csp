@@ -1,0 +1,211 @@
+--dii.csp
+
+-- Data independent induction applied to a simple (chain) routing
+-- network.
+
+-- See Chapter 17 of Understanding Concurrent Systems.
+
+-- Our topology is a chain of consecutively numbers nodes in order.
+-- any may accept a message for sending to any other.
+
+-- An empty node
+
+NodeE(n) = ([] d:nbrs(n) @ passin.d?(a,b,m) -> NodeF(n,a,b,m))
+            [] send.n?b?m -> NodeF(n,n,b,m)
+
+-- An empty node containing message m being send from a to b.
+
+NodeF(n,a,b,m) = if b==n then receive.n.a.m -> NodeE(n)
+                 else let d = if b<n then Dn else Up within
+                 passout.d!(a,b,m) -> NodeE(n)
+                 []
+                 swap.d!(a,b,m)?(a',b',m') 
+                              -> NodeF(n,a',b',m')
+
+
+MaxB = 3  -- a constant to keep the Superstate process finite -- the
+          -- size on the weak buffer
+N = 5     -- number of nodes
+Names = {0..N-1}
+Mess = {0,1}
+
+datatype dirs = Dn | Up
+
+channel send,receive:Names.Names.Mess
+
+channel passin,passout:dirs.(Names,Names,Mess)
+channel swap:dirs.(Names,Names,Mess).(Names,Names,Mess)
+
+-- First triple of swap is output, second is input
+
+-- The neighbours of a node, calculated as the directions they are in
+nbrs(n) = if n==0 then {Up}
+          else if n==N then {Dn}
+          else dirs
+
+-- We need to consider various cases of which nodes are the
+-- ones between which the channel under consideration lies.  For example
+inp = 2
+outp = 4
+
+--SS1(S) represents the behaviour of nodes all to the left of inp.
+SS1(S) = (|~| a:S, b:diff(Names,S), m:Mess @ 
+                   passout.Up.(a,b,m) -> SS1(S) 
+                   [] swap.Up.(a,b,m)?(a',b',m') ->  ok(a',b',S,SS1(S)))
+           |~| passin.Up?(a,b,m) -> ok(a,b,S,SS1(S))
+
+
+-- A standard weak buffer:
+WBUFF(n,a,b,<>) = a?x -> WBUFF(n,a,b,<x>)
+WBUFF(n,a,b,<x>^s) = b!x -> WBUFF(n,a,b,s)
+                     []
+                     (STOP |~|
+                      a?y -> (if #s==n-1 then CHAOS(Events)
+                              else WBUFF(n,a,b,<x>^s^<y>)))
+
+-- Our model relies on nodes not being sent data on nonsensical routes: if
+-- data is sent from outside into a left-hand sequence S then it really ought
+-- to come originally from outside and have the ultimate addressee inside.
+ok(a,b,S,P) = if not member(a,S) and (member(b,S)) then P 
+              else CHAOS(Events)
+
+-- SS2(S) represents a left-hand sequence that contains inp but not outp.
+-- s is the sequence of data it holds from inp to outp.
+
+SS2(S,s) = let 
+             Others = diff({(a,b) | a<-S, b<-diff(Names,S)},{(inp,outp)})
+             PoS(a,b,s) = if (a,b) == (inp,outp) then
+                             passout.Up.(a,b,head(s)) -> SS2(S,tail(s))
+                          [] swap.Up.(a,b,head(s))?(a',b',m') 
+                                         -> ok(a',b',S,SS2(S,tail(s)))
+                          else |~| m:Mess @
+                             passout.Up.(a,b,m) -> SS2(S,s)
+                          [] swap.Up.(a,b,m)?(a',b',m') 
+                                         -> ok(a',b',S,SS2(S,s))
+             within
+                if #s==0 then  
+                     (passin.Up?(a,b,m) -> ok(a,b,S,SS2(S,<>))
+                     [>
+                    ((send.inp.outp?m -> SS2(S,<m>))
+                     |~| (|~| (a,b):Others, m:Mess@ PoS(a,b,s))))
+                else
+                    ((send.inp.outp?m -> (if #s<MaxB then SS2(S,s^<m>)
+                                          else CHAOS(Events))
+                     [] passin.Up?(a,b,m) -> ok(a,b,S,SS2(S,s)))
+                     [>
+                     (PoS(inp,outp,s)  
+                      |~| (|~| (a,b):Others, m:Mess@ PoS(a,b,s))))
+
+GOthers = diff({(a,b) | a<-Names, b<-Names},{(inp,outp)})
+
+--SS3(S,s) represents a left-hand sequence that contains both inp and
+-- outp but is not the whole chain.
+
+SS3(S,s) = let 
+             Others = diff({(a,b) | a<-S, b<-diff(Names,S)},{(inp,outp)})
+             PoS(a,b,s) = |~| m:Mess @
+                             passout.Up.(a,b,m) -> SS3(S,s)
+                          [] swap.Up.(a,b,m)?(a',b',m') 
+                                         -> ok(a',b',S,SS3(S,s))
+             within
+                if #s==0 then  
+                     (passin.Up?(a,b,m) -> ok(a,b,S,SS3(S,<>))
+                     [>
+                    ((send.inp.outp?m -> SS3(S,<m>))
+                     |~| (|~| (a,b):Others, m:Mess@ PoS(a,b,s))))
+                else
+                    (((send.inp.outp?m -> (if #s<MaxB then SS3(S,s^<m>)
+                                                    else CHAOS(Events)))
+                     [] passin.Up?(a,b,m) -> ok(a,b,S,SS3(S,s)))
+                     [>
+                     ((receive.outp.inp.head(s) -> SS3(S,tail(s)))
+                      |~| (|~| (a,b):Others, m:Mess@ PoS(a,b,s))))
+
+-- Abs(P) abstracts away all sends and receives other than ones from inp to outp
+
+Abs(P) = let LA = {|send.a.b | (a,b) <- GOthers, a!= inp|}
+             H = {|send.a.b, receive.b.a | (a,b) <-GOthers|}         
+         within
+             (P [|LA|] CHAOS(LA))\H
+
+-- The following base case covers the case where inp > 0
+
+assert SS1({0}) [F=  Abs(NodeE(0))
+
+
+-- The following step case allows induction for all chains to the
+-- left of inp.
+
+assert SS1({0,1}) [F= Abs(invswap(SS1({0})) 
+                          [passout.Up <-> passin.Dn, passin.Up <-> passout.Dn,
+                            swap.Up <-> swap.Dn] 
+                          NodeE(1))
+
+-- To join a pair of processes together we nave to reverse the
+-- order of the triples in a swap to achieve the swap itself...
+
+swapd = {(a,b,m) | a <- Names, b <- Names, m <- Mess}
+
+invswap(P) = P[[swap.Up.x.y <- swap.Up.y.x | x <- swapd, y <-swapd]]
+
+-- The following step establishes the case in which adding inp onto  SS1
+-- means we satisfy SS2
+               
+assert SS2({i| i <- Names, i <=inp},<>) [F= 
+                       Abs(invswap(SS1({i| i <- Names, i <inp}))
+                          [passout.Up <-> passin.Dn, passin.Up <-> passout.Dn,
+                            swap.Up <-> swap.Dn] 
+                          NodeE(inp))
+
+-- The following alternative base case covers inp=0
+
+{-
+-- valid only when inp=0 
+
+assert SS2({0}) [F= Abs(NodeE(0))
+-}
+
+-- The following covers the case where a node is added
+-- when inp is already present but not outp, that node not outp
+
+-- Valid only when inp < outp-1
+         
+assert SS3({i | i <- Names, i <=inp+1},<>) [F= 
+            Abs(invswap(SS2({i | i <- Names, i <= inp},<>) )
+                          [passout.Up <-> passin.Dn, passin.Up <-> passout.Dn,
+                            swap.Up <-> swap.Dn] 
+                          NodeE(inp+1))
+
+-- The following covers the case where outp is added 
+-- valid when outp < N-1
+
+assert SS3({i | i <- Names, i <= outp},<>) [F= 
+            Abs(invswap(SS3({i | i <- Names, i < outp},<>) )
+                          [passout.Up <-> passin.Dn, passin.Up <-> passout.Dn,
+                            swap.Up <-> swap.Dn] 
+                          NodeE(outp))
+
+-- The following covers the case where a node bigger than outp is
+-- added that still does not complete the chain: valid when outp < N-2
+
+assert SS3({i | i <- Names, i <= outp+1},<>) [F= 
+            Abs(invswap(SS3({i | i <- Names, i <= outp},<>) )
+                          [passout.Up <-> passin.Dn, passin.Up <-> passout.Dn,
+                            swap.Up <-> swap.Dn] 
+                          NodeE(outp+1))
+
+-- There are two finalisation cases.  The first is valid when outp < N-1:
+
+assert WBUFF(MaxB,send.inp.outp, receive.outp.inp, <>) 
+       [F= Abs(invswap(SS3({i | i <- Names, i < N-1},<>)) 
+               [passout.Up <-> passin.Dn, passin.Up <-> passout.Dn,
+                            swap.Up <-> swap.Dn] 
+               NodeE(N-1))
+
+-- The second applies when outp=N-1
+
+assert WBUFF(MaxB,send.inp.outp, receive.outp.inp, <>) 
+       [F= Abs(invswap(SS2({i | i <- Names, i < N-1},<>)) 
+               [passout.Up <-> passin.Dn, passin.Up <-> passout.Dn,
+                            swap.Up <-> swap.Dn] 
+               NodeE(N-1))

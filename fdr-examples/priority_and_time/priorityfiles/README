@@ -1,0 +1,21 @@
+priorityfiles.csp
+
+This directory of files illustrate the priority function implemented
+for the first time in FDR 2.94
+
+simplepri.csp introduces the functionality.
+
+warnsorffpri.csp gives a direct implementation of Warnsdorff's algorithm
+for finding knight's tours, as opposed to the indirect calculation
+of priority described for this example in Chapter 20 of UCS.
+
+PrioritySpec.csp implements the main example from the paper describing the
+use of priority for checking fairness properties.
+
+Priority is used in all Timed CSP files (see other directories) to
+achieve maximal progress.
+
+In the method implemented in the Timed CSP examples in tnifiles, it is
+additionally used for creating a special specification.
+
+

@@ -1,0 +1,30 @@
+-- ncopy.csp 
+-- chaining COPY processes together
+
+-- Parameterised version of COPY:
+
+N = 12  -- the number of COPYs.  This network has 3^N states.
+
+T = {0,1}  -- the type passed over channels
+
+COPY(n) = c.n?x -> c.n+1!x -> COPY(n)
+
+channel c:{0..N}.T
+
+AC(r) = {|c.r,c.r+1|}
+
+CC = || r:{0..N-1} @ [AC(r)] COPY(r)
+
+-- Building a specification
+
+B(N,s) = #s<N & c.0?x -> B(N,s^<x>)
+       [] #s>0 & c.N.head(s) -> B(N,tail(s))
+
+RUN(X) =[] x:X @ x -> RUN(X)
+
+Spec = B(N,<>) ||| RUN({|c.r | r <- {1..N-1}|}) -- don't care on internal channels
+
+assert Spec [T= CC 
+
+assert CC :[deadlock free]
+

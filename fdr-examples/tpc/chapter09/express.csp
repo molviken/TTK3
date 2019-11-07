@@ -1,0 +1,270 @@
+-- express.csp
+
+-- Illustrating full abstraction results for CSP
+
+-- Part 1: expressibility
+
+-- Bill Roscoe
+
+-- This file, and its companion,
+-- illustrate the constructions used in Section 9.3 on
+-- expressibility and full abstraction for CSP.  The concepts
+-- illustrated are sophisticated and remote from direct practical
+-- applications.  You are strongly advised not to try to follow these
+-- files without studying the relevant section of the book!
+
+-- BASICS
+
+-- For simplicity and efficiency, we will deal only with the
+-- case of a small fixed alphabet
+
+channel a,b,c,fail,tick
+
+-- The role of the event fail will be as in the text.
+
+-- It is not permitted to refer to the actual tick event of CSP (written
+-- as _tick when you see it in debuggers, etc) in
+-- CSP scripts (because of the special role it has, only introduced via
+-- SKIP), but we do need a way of referring to it in the semantic values
+-- we manipulate in this script.  Therefore the declared event tick
+-- is included so we can handle semantic objects involving it.  The
+-- intention is that when it comes to mapping one of these (say the trace
+-- <a,tick>) to a real CSP process, that the corresponding behaviour of
+-- that process would replace all tick's by the "real" event _tick
+-- (i.e, this trace would become <a,_tick>).
+
+-- The automatically-supported set Events equals {a,b,c,fail,tick}, of
+-- course, but at the modelling level we want a set of communications
+-- that doesn't include tick as an ordinary one
+
+Sigma = diff(Events,{tick})
+
+-- and an augmented one that does:
+
+Sigmatick = Events
+
+-- so the range of possible refusal sets (at the modelling level) is
+
+RefSets = Set(Sigmatick)
+
+--^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-^~-
+
+-- EXPRESSIBILITY
+
+-- Here we are showing how the constructions in the book map a member
+-- of one of the semantic models to a CSP term that has the right value,
+-- in each of the models in turn.  In each case we can only handle finite
+-- semantic values, simply because FDR can only handle finite sets in
+-- its functional language.
+
+-- Traces model
+
+-- The following are as defined in the book
+
+-- A process that performs any given trace
+
+TT(<>) = STOP
+
+TT(<tick>) = SKIP
+
+TT(<x>^s) = x -> TT(s)
+
+-- and one that performs any nonempty, prefix-closed set of traces
+
+TINT(P) = |~| s:P @ TT(s)
+
+-- Here are some simple examples of pairs of objects, each being
+-- an element of the traces model and a CSP process that corresponds to it:
+
+TP1 = {<>,<a>,<b>,<a,a>,<b,b>}
+TQ1 = (a -> a -> STOP) [] (b -> b -> STOP)
+
+TP2 = {<>,<a>,<b>,<b,tick>}
+TQ2 = (a -> STOP) [] (b -> SKIP)
+
+-- That the expressibility construction works in these examples is
+-- demonstrated:
+
+assert TINT(TP1) [T= TQ1
+assert TQ1 [T= TINT(TP1)
+
+
+assert TINT(TP2) [T= TQ2
+assert TQ2 [T= TINT(TP2)
+
+---+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+-
+
+-- Stable failures model
+
+-- The simply divergent process plays an important role in the
+-- constructions for this model
+
+DIV = SKIP;DIV
+
+-- for example in the creation of modified trace processes that are
+-- minimally stable (only around ticks)
+
+TT'(<>) = DIV
+
+TT'(<tick>) = SKIP
+
+TT'(<x>^s) = DIV [] x -> TT'(s)
+
+-- a modified trace interpretation is thus
+
+TINT'(P) = |~| s:P @ TT'(s)
+
+-- this works just as well as the earlier one for the trace model:
+
+assert TINT'(TP2) [T= TQ2
+assert TQ2 [T= TINT'(TP2)
+
+-- but we need to be able to handle failures as well for the stable
+-- failures model.  The following is as defined in the book
+
+FF(<>,X) = [] x:diff(Sigma,X) @ x -> DIV
+FF(<x>^s,X) = DIV[] x -> FF(s,X)
+
+-- it assumes that the trace has no tick and that X does contain tick,
+-- and also that this is a failure of the underlying process that refuses
+-- all events impossible after the given trace.
+
+-- The following functions all manipulate semantic values: pairs (T,F) where
+-- T is a set of traces and F a set of failures:
+
+TFafter(s,(T,F)) = let n = #s within
+                   ({drop(n,t) | t <- T, s<=t},
+                    {(drop(n,t),X) | (t,X) <- F, s<=t})
+
+Refusalsafter(s,(T,F)) = {X | (t,X) <- F, s==t}
+
+RefMax(XX) = diff(XX,{X| X<-XX, Y<-XX, X<Y})
+
+-- The following function extracts the failures that are required for the
+-- failures component of the expressibility construction
+
+RepFail((T,F)) = {(s,X) | s <- notick(T), 
+                          X <- RefMax(Refusalsafter(s,(T,F))),
+			  member(tick,X)}
+
+notick(T) = diff(T,{s^<tick> | s^<tick> <- T})
+
+-- The complete representation of an arbitrary process is thus
+
+SFINT(P) = let FS = RepFail(P) 
+                (T,F) = P
+            within
+            if FS == {} then TINT'(T)
+            else TINT'(T) |~| (|~| (s,X):FS @ FF(s,X))
+
+-- We can again test out the construction with a few examples:
+
+SFP1 = (TP1,
+      union({(<>,X) | X<-RefSets, not({a,b} <= X)},{(<a,a>,X) | X <- RefSets}))
+
+SFQ1 = (a -> (DIV [] a -> STOP))
+      |~| (b -> (DIV ||| b -> STOP))
+
+-- The following function extracts the failures for mapping any appropriate
+-- member of the traces model (as discussed in Section 9.1) to either the
+-- stable failures, or failures/divergences, models
+
+detF(T) = {(s,X) | s <- T, X <- RefSets, 
+                   inter(X,{x | x <-Sigmatick, member(s^<x>,T)})=={}} 
+
+-- Thus the following function maps any member of T^d (described in Lemma
+-- 9.1.2) to the appropriate member of the stable failures model:
+
+detSFM(T) = (T,detF(T))
+
+-- so we can get another example from
+
+SFP2 = detSFM(TP2)
+
+SFQ2 = TQ2
+
+assert SFQ1 [F= SFINT(SFP1)
+assert SFINT(SFP1) [F= SFQ1
+assert SFQ2 [F= SFINT(SFP2)
+assert SFINT(SFP2) [F= SFQ2
+
+--\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-\/-
+
+-- Failures/Divergences model
+
+-- Here a member of the semantic model is represented as a pair consisting
+-- of failures and divergences.  For finiteness we will not record all
+-- of a divergent process's divergences and failures: only the ones up to
+-- minimal divergence traces.
+
+FDinitials((F,D)) = {x | (<x>,X) <- F}
+
+FDafter(s,(F,D)) = let n = #s within
+                   ({(drop(n,t),X) | (t,X) <- F, s<=t},
+                    {drop(n,t) | t <- D, s<=t})
+
+drop(0,s) = s
+drop(n,<x>^s) = drop(n-1,s)
+
+-- The expressibility construction for the failures/divergences model
+-- behaves differently depending on whether:
+
+-- The process is immediately divergent and, if not
+
+-- if the process can perform tick immediately,
+
+-- has maximal refusals containing tick
+
+-- or both of the last two
+
+FDINT(P) = let (F,D) = P 
+               MR = {X | X <- RefMax({X | (<>,X) <- F}), member(tick,X)}
+	   within
+           if member(<>,D) then DIV
+           else
+	   if not member(tick,FDinitials(P))
+                  then
+		  (([] x:FDinitials(P) @ x -> FDINT(FDafter(<x>,P)))
+		  |~|
+		  (|~| X:MR @ 
+		       ([] x:diff(Sigma,X) @ x -> FDINT(FDafter(<x>,P)))))
+           else
+	   if MR == {} then
+	  (([] x:diff(FDinitials(P),{tick}) @ x -> FDINT(FDafter(<x>,P)))
+		  [> SKIP)
+           else
+	  (([] x:diff(FDinitials(P),{tick}) @ x -> FDINT(FDafter(<x>,P)))
+		  |~|
+		  (|~| X:MR @ 
+		       ([] x:diff(Sigma,X) @ x -> FDINT(FDafter(<x>,P)))))
+
+
+FDP1 = ({(s,X) | s <- {<>,<a>,<a,a>,<a,a,a>}, X <- RefSets, 
+                 (#s>1 or not member(a,X))},{<a,a,a>})
+
+FDQ1 = a -> a -> (STOP |~| a -> DIV)
+
+assert FDINT(FDP1) [FD= FDQ1
+assert FDQ1 [FD= FDINT(FDP1)
+
+-- The analogue of the determinism construction used for the previous model:
+
+detFDM(T) = (detF(T),{})
+
+-- and the corresponding example:
+
+FDP2 = detFDM(TP2)
+FDQ2 = TQ2
+
+assert FDINT(FDP2) [FD= FDQ2
+assert FDQ2 [FD= FDINT(FDP2)
+
+FDP3 = (union({(<a>,X),(<tick>,X) | X <- RefSets},
+              {(<>,X) | X <- RefSets, not member(tick,X)}),
+	      {})
+
+FDQ3 = a -> STOP [> SKIP
+
+assert FDINT(FDP3) [FD= FDQ3
+assert FDQ3 [FD= FDINT(FDP3)
+

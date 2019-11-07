@@ -1,0 +1,65 @@
+-- reftest.csp
+
+-- Illustrating the difference between refusal testing and traces plus models.
+-- Chapter 11 of UCS
+
+channel a,b,c,d
+Sigma = {a,b,c,d}
+
+-- refusal testing distinguishes the processes
+
+P1 = (a -> a -> STOP) [> (a -> STOP)
+P2 = (a -> STOP) [> (a -> a -> STOP)
+
+assert P1 [R= P2
+assert P2 [R= P1
+assert P1 [V= P2
+assert P2 [V= P1
+
+-- It is possible to explore the consequences of priority in a
+-- refusal testing specification even without a priority model
+-- of execution
+
+-- So for example we can express the specification that 
+-- Provided the event a has only occurred when b was refused (i.e. b was
+-- given priority over a) the event c never occurs.
+
+S = STOP |~| a -> S |~| b -> S |~| d -> S |~| (a -> RTCHAOS [] b -> S)
+
+RTCHAOS = STOP |~| (|~| x:Sigma @ x -> RTCHAOS)
+
+-- Think of RTCHAOS as being a "don't care" condition.
+-- Such checks would become more efficient with divergence because
+-- FDR will not then explore the don't care paths.
+
+-- Here is a process that fails this specification.
+
+Q = a -> d -> ((b -> a -> c -> STOP) [] a -> c -> STOP)
+
+-- Which of the c's do you think prompts the failure?
+-- You can find out by replacing each in turn:
+
+Q1 = a -> d -> ((b -> a -> a -> STOP) [] a -> c -> STOP)
+Q2 = a -> d -> ((b -> a -> c -> STOP) [] a -> a -> STOP)
+
+assert S [R= Q
+assert S [R= Q1
+assert S [R= Q2
+
+-- make sure you understand why.
+
+-- The following modified version of S says c never happens when
+-- a has only occurred from stable states (i.e. tau has been given
+-- priority over it)
+
+S2 = (a -> RTCHAOS) [> (STOP |~| a -> S2 |~| b -> S2 |~| d -> S2) 
+
+-- So R1 satisfies this, but R2 does not:
+
+R1 = ((a -> a -> c -> STOP)[](b -> a -> a ->  STOP))\{b}
+R2 = ((a -> a -> STOP)[](b -> a -> a -> c ->  STOP))\{b}
+
+assert S2 [R= R1
+assert S2 [R= R2
+
+

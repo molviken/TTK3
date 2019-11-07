@@ -1,0 +1,51 @@
+-- renaming.csp  -- adapted from TCS file section3-2.csp 
+
+-- illustrating renaming
+
+-- A.W. Roscoe
+
+-- The following definitions are copied from previous files
+
+T = {0,1,2,3}
+
+channel left,right,aa,bb:T
+
+COPY = left?x -> right!x -> COPY
+
+COPY'(a,b) = a?x -> b!x -> COPY'(a,b)
+
+-- The equivalence between these processes, under renaming, is illustrated
+
+assert COPY[[left <- aa,right <- bb]] [FD= COPY'(aa,bb)
+assert COPY'(aa,bb) [FD= COPY[[left <- aa,right <- bb]] 
+
+-- For an example on non-injective renaming, we can define
+
+channel in,out1,out2:T
+channel in',out1',out2'
+
+SPLIT = in?x -> if x%2==1 then out1.x -> SPLIT
+                          else out2.x -> SPLIT
+
+SPLIT' = in' -> (out1' -> SPLIT' |~| out2' -> SPLIT')
+
+-- renaming the first, deterministic process, produces the second, 
+-- nondeterministic one.  Note the way this renaming is achieved with a
+-- comprehension over T.
+
+RenSPLIT = SPLIT[[in.x <- in', out1.x <- out1', out2.x <- out2' | x <- T]]
+
+assert RenSPLIT [T= SPLIT'
+assert SPLIT' [T= RenSPLIT
+
+
+-- For chapter 6: also true in failures/divergences model
+
+assert RenSPLIT [FD= SPLIT'
+assert SPLIT' [FD= RenSPLIT
+
+-- The determinism/nondeterminism of these processes can be demonstrated
+-- in the following checks 
+
+assert SPLIT :[deterministic]
+assert SPLIT' :[deterministic]

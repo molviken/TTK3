@@ -1,0 +1,334 @@
+-- Dining philosophers as a study in FDR2 syntax and compression.
+
+-- Bill Roscoe, March 1996, revised July 1996
+
+-- This file illustrates a few of the extra powers of FDR2, and shows
+-- how the way we put a network together can affect how well compression
+-- works.
+
+-- It includes the example discussed in Appendix C, and much more
+-- besides.
+
+-- We will be using high-level CSP processes with alphabets attached to
+-- enable us to calculate parallel compositions and appropriate hiding
+-- automatically.  The following file contains definitions of
+-- compression/composition operators.
+
+include "compression09.csp"
+
+-- The following functions are those that FDR2 supports to enable
+-- us to compress processes:
+
+transparent normal
+transparent diamond
+transparent sbisim
+transparent model_compress
+
+-- and you can try experiment with combinations of these.  
+
+-- The following is often good a combination, as is normal, 
+-- but what works best and
+-- in an acceptable time will depend very much on a case-by-case basis.
+
+sbdiam(P) = sbisim(diamond(P))
+
+-- Bear in mind (i) that compressions may produce significantly different
+-- results in different models, (ii) that none of the above will change the
+-- structure of a normalised process and that whatever other compression
+-- (if any) apply first, normalisation will always give the same answer
+-- (though producing the result may take significantly different times).
+-- (iii) only normalisation can increase the size of a state-space, and
+-- occasionally does so very severely.  diamond() will only compress processes
+-- with a significant proportion of invisible (tau) actions, and the
+-- others except perhaps sbisim() are generally helped by this.  Therefore
+-- it is usually an advantage to hide as much as we can as early as possible
+-- in building up a process.  
+
+-- The following parameter gives the number of dining philosophers.
+-- You will find that changing this has very different effects on
+-- the different formulations of the problem in this file.
+
+N=5
+
+-- Every one of the examples in this file take longer to check as N increases,
+-- but the order of growth varies from exponential (as in all the uncompressed
+-- checks), to linear.  Further transformation can take it down to
+-- logarithmic.
+
+-- This leads to the following sets and channel definitions:
+
+PHILNAMES= {0..N-1}
+FORKNAMES = {0..N-1}
+
+channel sits, eats, getsup:PHILNAMES
+channel picks, putsdown:PHILNAMES.FORKNAMES
+
+-- A philosopher sits down, picks up two forks, eats, puts down the forks
+-- and gets up, in an unending cycle.	
+
+PHIL(i) = sits!i -> picks!i!i -> picks!i!(i+1)%N ->
+          eats!i -> putsdown!i!(i+1)%N -> putsdown!i!i -> getsup!i -> PHIL(i)
+
+-- Along with this usual definition we now define the process' alphabet and
+-- an alphabetised process
+
+AlphaPhil(i) = {sits.i, picks.i.i, picks.i.(i+1)%N,
+                eats.i, putsdown.i.(i+1)%N, putsdown.i.i, getsup.i}
+
+Phil(i) = (PHIL(i),AlphaPhil(i))
+
+-- The same for the fork process
+
+FORK(i) = picks!i!i -> putsdown!i!i -> FORK(i)
+         []  picks!(i+N-1)%N!i -> putsdown!(i+N-1)%N!i -> FORK(i)
+
+AlphaFork(i) = {picks.j.i, putsdown.j.i | j <-{i,(i+N-1)%N}}
+
+Fork(i) = (FORK(i),AlphaFork(i))
+
+RUN(X) = [] x:X @ x -> RUN(X)
+
+STEP(X) = [] x:X @ x -> STOP
+
+--  Rather than put the network together "by hand" as we had to with FDR1,
+--  we can now use high-level constructs to do this for us.  The simplest
+--  approach is just to list the alphabetised processes that comprise the
+--  system.  Of course we can do this in any order we like, and this does
+--  make a difference later as we shall see:
+
+--  The first below lists the philosophers and forks separately (noting
+--  that these two classes never communicate internallt, only with members
+--  of the other
+
+Network = <Phil(i) | i <- <0..N-1>>^<Fork(i) | i <- <0..N-1>>
+
+--  while the second puts them in the logical order derived from the way
+--  they communicate.
+
+FNetwork = concat(<<Phil(i),Fork(i)>| i <-<0..N-1>>)
+
+assert ListPar(Network) :[deadlock free [F]]
+assert ListPar(FNetwork) :[deadlock free [F]]
+
+-- We can gain a lot of compression by applying the function
+-- LeafCompress which throws away irrelevant events (and all are
+-- irrelevant in the case of deadlock) not required for synchronisation
+-- (i.e., sits, eats, getsup)
+
+-- The order of the list makes no difference here:
+
+assert LeafCompress(normal)(Network)(Events) :[deadlock free [F]]
+assert LeafCompress(normal)(FNetwork)(Events) :[deadlock free [F]]
+
+-- More spectacular compression can be gained by applying the function
+-- InductiveCompress, which builds up the network gradually, compressing
+-- as it goes.  Here the order of the list makes a very large difference.
+
+assert InductiveCompress(normal)(Network)(Events) :[deadlock free [F]]
+assert InductiveCompress(normal)(FNetwork)(Events) :[deadlock free [F]]
+assert InductiveCompress(normal)(FNetwork)(diff(Events,{|eats|})) :[deadlock free [F]]
+assert InductiveCompress(normal)(FNetwork)(diff(Events,{|sits|})) :[deadlock free [F]]
+assert InductiveCompress(normal)(FNetwork)(diff(Events,{|getsup|})) :[deadlock free [F]]
+assert InductiveCompress(normal)(ASFNetwork)(diff(Events,{|eats|})) :[deadlock free [F]]
+assert InductiveCompress(normal)(ASFNetwork)(diff(Events,{|sits|})) :[deadlock free [F]]
+assert InductiveCompress(normal)(ASFNetwork)(diff(Events,{|getsup|})) :[deadlock free [F]]
+
+Eater = eats?i -> Eater
+assert Eater [F= InductiveCompress(normal)(ASFNetwork)(diff(Events,{|eats|}))
+
+DFE = |~| x:{0..N-1} @ eats.x -> DFE
+
+assert InductiveCompress(normal)(ASFNetwork)(diff(Events,{|eats|})) [F= DFE
+assert InductiveCompress(normal)(ASFNetwork)(diff(Events,{|eats|})) [T= DFE
+
+G = InductiveCompress(normal)(ASFNetwork)(diff(Events,{|eats|})) 
+
+-- All the above examples can, of course, deadlock.  There are several
+-- standard ways of avoiding this deadlock.  Perhaps the best, from a
+-- programming point of view, is to include both right- and left-handed
+-- philosophers in the ring (meaning the order in which they pick up
+-- their forks).
+
+-- A left-handed philosopher (assuming the others are right-handed) is
+-- given by
+
+LPHIL(i) = sits!i -> picks!i!(i+1)%N -> picks!i!i -> 
+           eats!i -> putsdown!i!(i+1)%N -> putsdown!i!i -> getsup!i -> LPHIL(i)
+
+LPhil(i) = (LPHIL(i),AlphaPhil(i))
+
+-- and we can put networks with one of these and the rest right-handed
+
+ASPhil(i) = if i==0 then LPhil(i) else Phil(i) 
+ASNetwork =  <ASPhil(i) | i <- <0..N-1>>^
+          <Fork(i) | i <- <0..N-1>>
+
+ASFNetwork= concat(<<if i==0 then LPhil(i) else Phil(i),Fork(i)>|
+                            i <-<0..N-1>>)
+
+
+assert ListPar(ASNetwork):[deadlock-free[F]]
+assert LeafCompress(normal)(ASNetwork)(Events):[deadlock-free[F]]
+
+ASPairList = <(ListPar(<ASPhil(i),Fork(i)>),
+               union(AlphaPhil(i),AlphaFork(i))) | i <- <0..N-1>>
+
+SPairList = <(ListPar(<Phil(i),Fork(i)>),
+               union(AlphaPhil(i),AlphaFork(i))) | i <- <0..N-1>>
+
+
+assert LeafCompress(normal)(ASPairList)(Events):[deadlock-free[F]]
+assert LeafCompress(normal)(SPairList)(Events):[deadlock-free[F]]
+
+-- To all intents and purposes the proofs that these are deadlock-free
+-- go through under just the same ways as finding the deadlocks in the
+-- others.  For example, we can prove deadlock-freedom efficiently by
+
+assert InductiveCompress(normal)(ASFNetwork)(Events) :[deadlock free [F]]
+
+-- Since the structure of the asymmetric networks above is such a small
+-- modification from the earlier one, it is not surporising that 
+-- compressions still work well for it as they did before.
+
+-- A much more substantial change is created by another standard
+-- solution to the problem, namely the introduction of a butler
+-- process whose duty it is to ensure that all the philosophers
+-- cannot sit down simultaneously.
+
+BUTLER(n) = (n>0 & getsup?i -> BUTLER(n-1))
+           [](n<N-1 & sits?i -> BUTLER(n+1))
+
+AlphaBut = {|sits,getsup|}
+
+Butler = (BUTLER(0),AlphaBut)
+
+-- When we combine the butler with the other processes in parallel and
+-- attempt the same compressions as before, it is impossible to hide
+-- events nearly as efficiently (i.e., near to their use) as before,
+-- since each separate philosopher has communications in sits and
+-- getsup with the butler, and whereas previously these events
+-- were all hidden immediately in the Sigma-hiding deadlock check,
+-- now we have to wait until both the butler and the relevant
+-- philosopher are present.  
+
+-- We can put the butler on as an afterthought (since this order will
+-- add him on last)
+
+BNetwork1 =<Butler>^FNetwork
+
+-- or put him down first and add the other processes around him:
+
+BNetwork2 = FNetwork^<Butler>
+
+-- or put him down first and then add the philosophers and finally
+-- the forks (on the basis that the philosophers are the only
+-- processes that communicate with the butler, so this order gets
+-- the butler's alphabet hidden as early as possible).
+
+BNetwork3 = <Fork(i) | i <- <0..N-1>>^<Phil(i) | i <- <0..N-1>>^<Butler>
+
+-- These can be checked as follows, but none of these structures
+-- is particularly successful at giving good compressions.  The
+-- middle one is the most interesting since it leads to a long succession
+-- of compressions alternating between two slowly increasing sequences of
+-- sizes as FORK and PHIL processes are added.
+
+assert InductiveCompress(normal)(BNetwork1)(Events) :[deadlock free [F]]
+assert InductiveCompress(normal)(BNetwork2)(Events) :[deadlock free [F]]
+assert InductiveCompress(normal)(BNetwork3)(Events) :[deadlock free [F]]
+
+-- How far you can get with these will depend on your patience and the
+-- sort of compression you use.   
+
+-- In particular, it is usually better to form a system out of a
+-- number of individually compressed subcomponents rather than attempting
+-- to take compression all the way to the outside.
+
+-- To enable this tactic to employed with as much flexibility as possible,
+-- there is another high-level function supplied.
+-- If pss is a  list of lists of processes (i.e., two
+-- levels of list structure), StructuredCompress(compress)(ps)(X) puts all the
+-- processes in the lists in parallel (according to their alphabets)
+-- and hides X according to the following rules:
+
+-- The individual processes have any available hiding and compression
+-- done;
+
+-- Then the lower-level lists are inductively composed and compressed;
+
+-- Then the results of these are composed without further compression.
+
+
+-- This, of course, gives great flexibility in putting the network
+-- together.
+
+-- There is still no particularly good way of building the network
+-- with a single butler, since that process has rich communications
+-- with the entire system. Nevertheless we can build bigger systems
+-- using this new technique than we can either without compression
+-- or using InductiveCompress
+
+
+assert StructuredCompress(normal)(
+                          groupsof(4)(BNetwork1))(Events) :[deadlock free [F]]
+assert StructuredCompress(normal)(
+                          groupsof(5)(BNetwork1))(Events) :[deadlock free [F]]
+assert StructuredCompress(normal)(
+                          groupsof(6)(BNetwork1))(Events) :[deadlock free [F]]
+
+-- You will (at least with normalisation) find you get an advantage in
+-- the size of the final check with taking the larger groups (as one would
+-- expect), though the individual compressions take longer.
+
+-- Nevertheless, the size of network that can be handled practically with a 
+-- single, universal butler process is limited to the low teens (at least
+-- with the techniques I have discovered to date).  This is probably because
+-- of the fact that we have one process connected to so many others.
+
+-- Imagine that instead of having one butler we have a number of footmen,
+-- each responsible for a small group of philosophers.  The footman
+-- responsible for the r from k to k+r-1 can be defined: 
+
+
+FOOTMAN(k,r,n) = (n>0 & getsup?i:{(k+i)%N | i<-{0..r-1}} -> FOOTMAN(k,r,n-1))
+           [](n<r-1 & sits?i:{(k+i)%N | i<-{0..r-1}} -> FOOTMAN(k,r,n+1))
+
+AlphaFootman(k,r) = {sits.(k+i)%N,getsup.(k+i)%N| i<-{0..r-1}}
+
+Footman(k,r) = (FOOTMAN(k,r,0),AlphaFootman(k,r))
+
+-- Of course, having a single footman on a few philosophers would be enough
+-- to eliminate deadlock in this network, but it is interesting to examine
+-- a network in which each philosopher is one of a group allocated to
+-- a footman.  This results in a network with a rich but largely
+-- localisable communication structure.
+-- The group of philosophers for the process above, with the
+-- forks of the same indices, is
+
+Group(k,r) = <Footman(k,r)>^<Fork((k+i)%N),Phil((k+i)%N) | i<-<0..r-1>>
+
+-- and we can allocate footmen to all the philosophers in our original
+-- network by 
+
+PhilsAndFootmen(k) = PAF(N,k)
+
+PAF(M,k) = let m=(if M<=k then M
+                 else if (M/k)*k==M then k
+		 else k-1)
+           within
+	   if M==0 then <> else
+	   <Group(N-M,m)>^PAF(M-m,k)
+
+-- (giving k or k-1 to each footman provided M>=k)
+
+-- This checks very effectively for deadlock freedom for seemingly
+-- arbitrary N, though obviously the complexity of the groups increases with
+-- size.  Two example checks are
+
+assert StructuredCompress(normal)(PAF(N,3))(Events) :[deadlock free [F]]
+assert StructuredCompress(normal)(PAF(N,4))(Events) :[deadlock free [F]]
+
+-- Clearly one could build further on these examples in numerous ways,
+-- but hopefully this file has provided an introduction to the use of
+-- high-level process construction and compression than readers can build
+-- upon in their own examples.

@@ -1,0 +1,159 @@
+
+-- solitaire.csp
+
+-- version for FDR2
+
+-- Bill Roscoe
+
+-- This file implements the system  described in Section 15.1 of TCP
+-- with the addition of a DFS search that finds a solution instantly
+-- as described in Section 8.5 of UCS
+
+-- SETTING UP THE BOARD
+
+-- As described in the text, we use a notation for describing boards that
+-- looks like physical boards
+
+datatype Pictel = X | P | E  
+
+-- X is a non-slot,
+-- E is an empty one
+-- P  is a full one
+
+-- We could pick a variety of boards to try and solve.  The first one
+-- here is the standard one
+
+Board1 = <<X,X,P,P,P,X,X>,
+          <X,X,P,P,P,X,X>,
+          <P,P,P,P,P,P,P>,
+          <P,P,P,E,P,P,P>,
+          <P,P,P,P,P,P,P>,
+          <X,X,P,P,P,X,X>,
+          <X,X,P,P,P,X,X>>
+
+-- The following boards are soluble...
+
+Board2 = <<X,X,P,P,P,X,X>,
+          <X,X,P,P,P,X,X>,
+          <X,X,P,P,P,X,X>,
+          <P,P,P,P,P,P,P>,
+          <P,P,P,E,P,P,P>,
+          <P,P,P,P,P,P,P>,
+          <X,X,P,P,P,X,X>,
+          <X,X,P,P,P,X,X>>
+
+Board3 = <<X,X,P,P,P,X,X,X>,
+          <X,X,P,P,P,X,X,X>,
+          <X,X,P,P,P,X,X,X>,
+          <P,P,P,P,P,P,P,P>,
+          <P,P,P,E,P,P,P,P>,
+          <P,P,P,P,P,P,P,P>,
+          <X,X,P,P,P,X,X,X>,
+          <X,X,P,P,P,X,X,X>>
+
+
+Board4 = <<X,X,X,P,P,P,X,X,X>,
+          <X,X,X,P,P,P,X,X,X>,
+          <X,X,X,P,P,P,X,X,X>,
+          <P,P,P,P,P,P,P,P,P>,
+          <P,P,P,P,E,P,P,P,P>,
+          <P,P,P,P,P,P,P,P,P>,
+          <X,X,X,P,P,P,X,X,X>,
+          <X,X,X,P,P,P,X,X,X>,
+          <X,X,X,P,P,P,X,X,X>>
+
+
+-- The following sets up which board the rest of the script uses.  
+
+Board = Board1
+
+-- Having made our choice of board, we can map it to a system of processes
+-- The following manipulations are designed to make the above notation
+-- easy to access
+
+Height = #Board
+Width = #(head(Board))
+
+nth(n,xs) = if n==0 then head(xs) 
+                    else nth(n-1,tail(xs))
+
+init(i,j) = nth(j,nth(Height-1-i,Board))
+
+BoardCoords = {(i,j) | i <- {0..Height-1}, j <- {0..Width-1}, init(i,j)!=X}
+
+-- As discussed in the book, we use an enlarged board in declaring the
+-- possible move events:
+
+Ycoords = {(-2)..Height+1}
+Xcoords = {(-2)..Width+1}
+
+channel up,down,left,right:Ycoords.Xcoords
+channel done
+
+-- SLOT PROCESSES
+
+Full(i,j,target) = (target==P) & done -> Full(i,j,target)
+                  [] up.i+2.j -> Empty(i,j,target)
+                  [] down.i-2.j -> Empty(i,j,target)
+                  [] right.i.j+2 -> Empty(i,j,target)
+                  [] left.i.j-2 -> Empty(i,j,target)
+                  [] up.i+1.j -> Empty(i,j,target)
+                  [] down.i-1.j -> Empty(i,j,target)
+                  [] right.i.j+1 -> Empty(i,j,target)
+                  [] left.i.j-1 -> Empty(i,j,target)
+
+Empty(i,j,target) = (target==E) & done -> Empty(i,j,target)
+                  [] up.i.j -> Full(i,j,target)
+                  [] down.i.j -> Full(i,j,target)
+                  [] right.i.j -> Full(i,j,target)
+                  [] left.i.j -> Full(i,j,target)
+
+Slot(i,j) = if init(i,j) == E then Empty(i,j,P)
+                              else Full(i,j,E)
+
+-- Each slot process has to co-operate in each move event
+-- that it can participate in.
+
+Alpha(i,j) = Union({{done},
+                    {up.i+k.j    | k <-{0,1,2}},
+                    {down.i-k.j  | k <-{0,1,2}},
+                    {left.i.j-k  | k <-{0,1,2}},
+                    {right.i.j+k | k <-{0,1,2}}})
+
+-- The "real moves" are those where all three slots involved are
+-- actually on the board:
+
+JumpTos = {up.i.j, down.i.j, left.i.j, right.i.j | (i,j) <- BoardCoords}
+
+JumpOvers = {up.i+1.j, down.i-1.j, left.i.j-1, 
+             right.i.j+1 | (i,j) <- BoardCoords}
+
+JumpFroms = {up.i+2.j, down.i-2.j, left.i.j-2, 
+             right.i.j+2 | (i,j) <- BoardCoords}
+
+RealMoves = inter(JumpTos,inter(JumpOvers,JumpFroms))
+
+-- so we can calculate which moves the processes perform that are
+-- not allowed.
+
+
+OffBoardMoves = diff({|up,down,left,right|},RealMoves)
+
+-- The CSP description of the puzzle is just the following process,
+-- which can perform just the sequences of moves that are legal for the
+-- puzzle and can communicate done just when the puzzle has been solved.
+
+Puzzle = (|| (i,j):BoardCoords @ [Alpha(i,j)] Slot(i,j)) [|OffBoardMoves|] STOP
+
+-- The usual check by FDR is coded
+
+assert STOP [T= Puzzle \ {|up,down,left,right|}
+
+-- but the following version exploits the fact that an infinite sequence
+-- of events can only happen if all but the first few are "done".
+-- So divergence can occur in the following if there is a solution:
+
+assert Puzzle \ Events :[divergence free]
+
+-- The way FDR checks for divergence by DFS here means a solution is
+-- found very quickly.

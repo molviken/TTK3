@@ -1,0 +1,143 @@
+
+-- infexamples.csp 
+
+-- illustrating infinite-state recursions using >> and //
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of some of the main CSP processes in Chapter 4 of those into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE.  
+
+-- This is the second file for chapter 4,and deals with the more
+-- interesting examples, none of which will run on FDR since they
+-- use potentially infinite recursions through parallel operators.
+-- They do work very nicely on ProBE, though.
+
+-- As in the earlier file, the operators >> and // are both replaced
+-- by the more type-correct and general [a <-> b, ...] form of
+-- machine-readable CSP.
+
+-- Three of the examples in this file (buffers, a set process, and a sorting
+-- program) use a datatype.  The following declaration determines the
+-- size of this.
+
+N = 5
+
+T = {0..N-1}
+
+-- An infinite-state buffer created by recursion through >>:
+
+channel left,right:T
+
+COPY = left?x -> right!x -> COPY
+
+Bplus = left?x -> (Bplus [right <-> left] (right!x -> COPY))
+
+-- Interesting variations on this example are
+
+BB = left?x -> (BB [right <-> left] right!x -> BB)
+
+BE = left?x -> (COPY [right <-> left] right!x -> BE)
+
+-- Try to work out what these do before running them!
+
+--%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+-- The enslavement-based counter is defined:
+
+channel up, down, iszero, m_up, m_down, m_iszero
+
+ZeroE = up -> (Succ [m_up <-> up, m_down <-> down, m_iszero <-> iszero] ZeroE)
+     [] iszero -> ZeroE
+
+Succ = down -> (m_iszero -> NoSucc
+                [] m_down -> Succ)
+       [] up -> m_up -> Succ
+
+NoSucc = iszero -> NoSucc
+       [] up -> Succ
+
+--%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+-- A recursively-created set recursion (see the book for explanation):
+
+channel add,m_add,del,m_del,isin,m_isin:T
+
+channel yes,no,m_yes,m_no
+
+C(x) = add?y -> (if x==y then C(x) else m_add!y -> C(x))
+     [] del?y -> (if x==y then E else m_del!y -> C(x))
+     [] isin?y -> (if x==y then yes -> C(x) else 
+				m_isin!y -> (m_yes -> yes -> C(x)
+					   [] m_no -> no -> C(x)))
+
+E = add?y -> m_del!y -> C(y)
+   [] del?y -> m_del!y -> E
+   [] isin?y -> m_isin!y -> (m_yes -> yes -> E
+			     [] m_no -> no -> E)
+
+-- The function of the set recursion is
+
+F(P) = add?x -> (C(x) [m_add<->add, m_del<->del, m_isin<->isin, 
+                       m_yes<->yes, m_no<->no] P)
+       [] del?x -> P
+       [] isin?x -> no -> P
+
+-- and therefore the process we are trying to define is
+
+SET = F(SET)
+
+-- Though you can't directly check the equivalence between SET and the
+-- process SSet({}) defined below:
+
+SSet(X) = add?x -> SSet(union(X,{x}))
+        [] del?x -> SSet(diff(X,{x}))
+	[] isin?x -> (if member(x,X) then yes else no) -> SSet(X)
+
+-- you CAN use FDR to check that SSet({}) is a fixed point of the function F:
+
+assert SSet({}) [FD= F(SSet({}))
+assert F(SSet({})) [FD= SSet({})
+
+-- The second of these is, in fact, unnecessary since the process
+-- SSet({}) is deterministic, so that anything which refines it equals it.
+
+-- This fact follows by construction of SSet({}) but you can also check it:
+
+assert SSet({}) :[deterministic]
+
+-- The equality of the two processes proves that SET = SSet({}) on the
+-- assumption that F() has a unique fixed point.
+
+
+--%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+-- Our final example is the quicksort network from Section 4.2:
+
+channel in,out,u_in,u_out,d_in,d_out:T
+
+channel last,end,u_last,u_end,d_last,d_end
+
+-- This one is defined directly rather than setting up the recursive function
+-- as was done in the SET example:
+
+Qsort = last -> end -> Qsort
+       [] in?x ->  
+     ((IN(x)[u_in <-> in, u_out <-> out, u_last <-> last, u_end <-> end] Qsort)
+            [d_in <-> in, d_out <-> out, d_last <-> last, d_end <-> end] Qsort)
+
+IN(x) = in?y -> (if y < x then d_in!y -> IN(x)
+                         else u_in!y -> IN(x))
+       [] last -> u_last -> d_last -> OUT1(x)
+
+OUT1(x) = u_out?y -> out!y -> OUT1(x)
+        [] u_end -> out!x -> OUT2
+
+
+OUT2 = d_out?y -> out!y -> OUT2
+      [] d_end -> end -> X
+
+X = last -> end -> X
+   [] in?x -> IN(x)

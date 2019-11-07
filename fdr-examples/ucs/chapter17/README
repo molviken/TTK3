@@ -1,0 +1,8 @@
+Files for chapter 17 of Understanding Concurrent Systems
+
+indphils.csp   induction and the dining philosophers
+di.csp         simple data independence: see also chapter 15 of TPC
+dii.csp        the data independent induction example from the text
+zbullyr.csp    demonstrating buffer tolerance properties of the corrected
+               bully alorithm
+btconf.csp     illustrating the buffering criterion for confluence

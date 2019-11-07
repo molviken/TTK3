@@ -1,0 +1,79 @@
+-- warnsdorffren.csp
+-- Bill Roscoe
+-- Applying a well-known heuristic to solving the knights tour problem
+-- adding the renaming optimisation
+
+-- See Section 20.1 of UCS
+
+
+N = 16  -- Board dimension, note this is larger!
+
+Coords = {(i,j) | i <- {0..N-1}, j <- {0..N-1}}
+
+channel move:Coords.{0..8}
+channel morethan:{0..7}
+channel movehere,moveadj,moveoth:{0..8}
+channel done
+
+
+-- Slot process which knows whether the knight is adjacent to it or not,
+-- and when it is will only allow morethan.n events where n is greater than
+-- the number of free adjacent slots.  When it accepts a move it attaches
+-- the present number of these.
+
+-- These use renamable events for move to here, to adjacent, and elsewhere.
+
+GPriEmpty(n) = n>0& moveadj?_ -> GPriEmptyA(n-1)
+                [] moveoth?_ -> GPriEmpty(n)
+                [] morethan?_ -> GPriEmpty(n)
+
+GPriEmptyA(n) = movehere.n -> GPriFull
+                 [] moveoth?_ -> GPriEmpty(n)
+                 [] morethan?_:{k | k <- {0..n-1}} -> GPriEmptyA(n)
+
+GPriFull = done -> GPriFull
+            [] moveadj?_ -> GPriFull
+            [] moveoth?_ -> GPriFull
+            [] morethan?_:{k | k <- {0..7}} -> GPriFull
+
+PriEmpty(p,n) = GPriEmpty(n)[[movehere <- move.p]]
+                     [[moveadj <- move.q | q <- adj(p)]] 
+                     [[moveoth <- move.q | q <- diff(Coords,union(adj(p),{p}))]] 
+
+PriEmptyA(p,n) = GPriEmptyA(n)[[movehere <- move.p]]
+                     [[moveadj <- move.q | q <- adj(p)]] 
+                     [[moveoth<- move.q | q <- diff(Coords,union(adj(p),{p}))]] 
+
+PriFull(p) = GPriFull[[movehere <- move.p]]
+                     [[moveadj <- move.q | q <- adj(p)]] 
+                     [[moveoth <- move.q | q <- diff(Coords,union(adj(p),{p}))]] 
+
+
+-- There are two options in the following, depending on whether we want
+-- a tour or circuit
+
+PriKnight(p,n) = n<8 & morethan.n -> PriKnight(p,n+1)
+                 [] move?q!n -> PriKnight(q,0)
+--                 [] member(p,adj((0,0))) & done -> PriKnight(p,n) -- for circuit
+                   [] done -> PriKnight(p,n)  -- for tour
+
+kndel = {(2*p,q),(p,2*q) | p <- { -1,1}, q <- { -1,1}}
+
+adj((i,j)) = inter(Coords,{(i+x,j+y) | (x,y) <- kndel})
+
+
+Init(p) = if p==(0,0) then PriFull(p)
+          else if member(p,adj((0,0))) then PriEmptyA(p,card(adj(p))-1)
+          else PriEmpty(p,card(adj(p)))
+
+Board = [|{|move,morethan,done|}|] p:Coords  @ Init(p)
+
+Puzzle =  Board [|{|move,morethan,done|}|] PriKnight((0,0),0)
+
+assert STOP [T= Puzzle\{|move,morethan|}
+
+-- The DFS check using livelock from Chapter 8
+-- this sometimes handles much bigger boards!
+
+assert Puzzle\Events :[livelock-free]
+

@@ -1,0 +1,256 @@
+-- tabp2.csp
+
+-- The Timed CSP treatment of Alternating Bit Protocol from 
+-- Chapter 15 of UCS translated into tock-CSP 
+
+{- Recall the Timed CSP code for this example
+
+S(s) = AC(1-s) /\ in?x -> S'(s,x,0)
+
+S'(s,x,n) = AC(1-s) /\ S''(s,x,n)
+
+S''(s,x) = d.s -> S(1-s)
+           [] (WAIT(n); a.s.x -> S'(s,x,TM)
+
+AC(s) = d.s -> AC(s)
+
+
+R(s) = b?x!(1-s) -> c.(1-s) -> R(s)
+     [] b?c!s -> out!x -> c!s -> R(1-s)
+
+CE(in,out) = in?x -> CE'(in,out,x)
+
+CE'(in,out,x) = out!x -> CE(in,out)
+               [] dup -> out!x -> CE'(in,out,x)
+               [] loss -> CE(in,out)
+
+with the complete composition of this being
+
+S(0)[|{|tock,a,d|}|]
+((E(a,b)[|{tock}|]E(c,d)[[dup <- dup',loss <- loss']])
+[|{|b,c,tock|}|] R(0))
+
+Recall that we suggested in the book that the
+error events might be better treated as introducing no delay.
+
+All the above components except the first are very simple to
+translate using the equivalent of the time(P) function as
+described in Chapter 15 because there are no ambiguous []s
+or time-outs: every state either idles or performs a tock
+to represent the time of a single action:
+-}
+
+channel tock
+channel dup, loss, dup', loss'
+channel in,out:T
+
+T = {0,1}
+Bit = {0,1}
+TM = 4  -- time between resends
+
+channel a,b:T.Bit
+channel c,d:Bit
+
+TCE(i,o) = tock -> TCE(i,o)
+           [] i?x -> tock -> TCE'(i,o,x)
+
+TCE'(i,o,x) = tock -> TCE'(i,o,x)
+              [] o!x -> tock -> TCE(i,o)
+              [] dup -> TCE''(i,o,x)
+              [] loss -> TCE(i,o)
+
+TCE''(i,o,x) = tock -> TCE''(i,o,x)
+               [] o!x -> tock -> TCE'(i,o,x)
+
+
+TR(s) = tock -> TR(s)
+        [] b?x!(1-s) -> tock -> TR1(s) 
+        [] b?x!s -> tock -> TR2(s,x)
+
+TR1(s) = tock -> TR1(s)
+         [] c!(1-s) -> tock -> TR(s)
+ 
+
+TR2(s,x) = tock -> TR2(s,x) 
+           [] out!x -> tock -> TR3(s)
+
+TR3(s) = tock -> TR3(s)
+         [] c!s -> tock -> TR(1-s)
+
+-- We now study how to translate S(0), which is much more
+-- challenging
+
+-- S(x) = AC(1-s) /\ in?x -> S'(s,x,0)
+
+-- is evidently an idling process.  We do not want the occurrence of
+-- tock to trip the interrupt, only an in.x
+
+-- It follows we can translate this as 
+-- time(AC(1-s)) /\ in?x -> tock time(S'(s,x,0))
+-- or in other words
+
+TS(s) = TAC(1-s) /\ in?x -> tock -> TS'(s,x,0)
+
+TAC(s) = tock -> TAC(s) 
+         [] d.s -> TAC(s)
+
+-- The state
+-- S'(s,x,n) = AC(1-s) /\ S''(s,x,n)
+-- does not have the same form since
+-- S''(s,x,n) = d.s -> S(1-s)
+--              [] (WAIT(n); a.x.s -> S'(s,x,TM)
+         
+-- is not idling, and furthermore no interruption need take
+-- place at time n -- all we get is an extra event available.
+
+-- We can define
+
+{- 
+TS''(s,x,n,r) = r==0 & a.x.s -> TS'(s,x,TM)
+                [] d.s -> tock -> TS(1-s)  
+                [] tock -> TS''(s,x,n,max(r-1,0))
+-}
+
+max(x,y) = if x>y then x else y
+
+-- and this (r=n initially) defines the timed behaviour of S''(s,x,n)
+-- we can create the correct behaviour of the state S' by modifying the
+-- above:
+
+TSc(s,x,n,r,w) = r==0 & a.x.s -> TSc(s,x,TM,TM,false)
+               [] d.s -> tock -> TS(1-s)
+               [] tock -> TSc(s,x,n,max(r-1,0),false)
+               [] not(w) & d.(1-s) ->  TSc(s,x,n,r,true)
+
+TS'(s,x,n) = TSc(s,x,n,n,false)
+
+-- The w parameter implements the wait of one tock between d.1-s events.
+-- It is unfortunate that this is so remote from the original.
+-- One can get closer using parallel composition, but that gets
+-- problematic with recursion.
+
+-- So the timed system is combined:
+
+TSYSTEM =
+(TS(0)[|{|tock,a,d|}|]
+((TCE(a,b)[|{tock}|]TCE(c,d)[[dup <- dup',loss <- loss']])
+[|{|b,c,tock|}|] TR(0)))\{|a,b,c,d|}
+
+Errors = {dup,dup',loss,loss'}
+
+-- Here is a version of TCOPY2 with parameters representing the least
+-- waits for message sending and subsequent message
+
+TCOPY2(n,m) = let TC2'(x) = tock -> TC2'(x)
+                            [] out!x -> (WAIT(m);TC2)
+                  TC2 = tock -> TC2
+                        [] in?x -> (WAIT(n);TC2'(x))
+              within TC2
+
+WAIT(0) = SKIP
+WAIT(n) = tock -> WAIT(n-1)
+
+-- The following check succeeds, showing the
+
+assert TCOPY2(3,3) [T= TSYSTEM
+
+-- Note that we have neither restricted the number of error events nor
+-- imposed tau priority here: both of these will create trace refinements
+-- of our system and so the above proof established correctness under these
+-- assumptions also.  [In fact we will always want to use tau priority in the
+-- above model.]
+
+-- We would like to be able to prove
+
+
+assert TCOPY2(3,3) [F= (TSYSTEM[|Errors|]STOP) :[tau priority over]: {tock}
+
+-- but unfortunately failures tau-priority checks are not supported
+-- at the time of writing.
+
+-- We can create the effect of the above check by putting TSYSTEM in
+-- a testing harness which has the option of testing when an
+-- event is available by making it into a tau and therefore urgent.
+
+-- For this purpose we use double renaming to create two copies
+-- each of in and out: one to be urgent and one that is not to be.
+
+channel in', out':T
+
+DSYSTEM = TSYSTEM[[in <- in, in <- in', out <- out, out <- out']]
+
+-- The following test has two time parameters, 
+-- These are the 
+-- times after which input and output must be available.
+
+channel urgent, error
+Error = error -> STOP
+
+Test(n,m) = let Tst(k) = 
+                if k > 0 then
+                tock -> Tst(k-1)
+                [] in?x -> Tst'(n,x)
+                else
+                (tock -> Tst(0)
+                 [] in?x -> Tst'(n,x)
+                 []
+                 (urgent -> (in'?x -> Tst'(n,x)
+                             [] tock -> Error)))
+                Tst'(k,x) =
+                if k > 0 then
+                tock -> Tst'(k-1,x)
+                [] out!x -> Tst(m)
+                [] out?y:diff(T,{x}) -> Error
+                else
+                (tock -> Tst'(0,x)
+                 [] out.x -> Tst(m)
+                 []
+                 (urgent -> (out'.x -> Tst(m)
+                             [] tock -> Error)))
+            within Tst(0)
+                
+                              
+assert RUN(diff(Events,{error})) [T= (DSYSTEM [|{|in,out,in',out',tock|}|]Test(3,3))\{|in',out'|} :[tau priority over]: {tock}
+
+assert RUN(diff(Events,{error})) [T= ((DSYSTEM[|Errors|]STOP) [|{|in,out,in',out',tock|}|]Test(3,3))\{|in',out'|} :[tau priority over]: {tock}
+
+EReg(n,m) = -- allows n errors in each block of m tocks
+            let E(r,s) =  -- s tocks to go, r errors so far
+                        tock -> (if s==0 then E(0,m) 
+                                 else E(r,s-1)) 
+                        [] r < n & ([] x:Errors @ x -> E(r+1,s))
+            within
+                E(0,m)
+
+
+Assertion(n,m,x,y) = (((DSYSTEM[|union(Errors,{tock})|]EReg(n,m)) [|{|in,out,in',out',tock|}|]Test(x,y))\{|in',out'|})
+
+-- For example, experimentation quickly shows that with 1 error per 4 tocks, the 
+-- system can take 26 tocks to transmit a message and 18 to get into a position
+-- to re-input after a delivery.
+
+-- any more than 1-in-4 (even 8-in-31) appears to lead to potential non-transmission.
+
+assert RUN(diff(Events,{error})) [T= Assertion(1,4,26,18) :[tau priority over]: {tock}
+assert RUN(diff(Events,{error})) [T= Assertion(1,4,25,18) :[tau priority over]: {tock}
+assert RUN(diff(Events,{error})) [T= Assertion(1,4,26,17) :[tau priority over]: {tock}
+assert RUN(diff(Events,{error})) [T= Assertion(1,3,100,100) :[tau priority over]: {tock}
+assert RUN(diff(Events,{error})) [T= Assertion(2,7,300,300) :[tau priority over]: {tock}
+assert RUN(diff(Events,{error})) [T= Assertion(4,15,300,300) :[tau priority over]: {tock}
+assert RUN(diff(Events,{error})) [T= Assertion(2,8,200,200) :[tau priority over]: {tock}
+assert RUN(diff(Events,{error})) [T= Assertion(8,31,400,400) :[tau priority over]: {tock}
+
+
+
+
+
+RUN(X) = [] x:X @ x -> RUN(X)
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,110 @@
+-- failsim.csp
+-- Bill Roscoe
+
+-- Simulating a finite set of failures as an equivalent process
+
+-- Given any value in a CSP model, it is possible to create a syntactic
+-- process with the same value.
+
+channel a,b,c,d  -- events for experimenting with
+
+
+-- Stable failures model
+
+DIV = DIV |~| DIV
+
+-- The following processes are the most refined that contain
+-- the relevant behaviour.
+
+Trace(<>) = DIV
+Trace(<x>^s) = DIV [] x -> Trace(s)
+
+Acc((<>,A)) = [] x:A @ x -> DIV 
+Acc((<x>^s,A)) = DIV [] x -> Acc((s,A))
+
+-- So we can define
+
+SFMProc((T,F)) = if F=={} then (|~| t:T @ Trace(t)) 
+                 else ((|~| t:T @ Trace(t)) |~| (|~| acc:ACCS((T,F)) @ Acc(acc)))
+
+-- where
+
+ACCS((T,F)) = {(s,diff(initials(after(T,s)),X)) 
+              | (s,X) <- F} 
+
+after(T,<>) = T
+after(T,<x>^s) = after({t | <y>^t <- T, y==x},s)
+
+initials(T) = {x | <x> <- T}
+
+-- Consider the processes
+
+S = {a,b}
+PS = {{},{a},{b},{a,b}}
+
+P1 = a -> (DIV [] a -> STOP) |~| b -> a -> STOP
+
+-- stable failures: maximal refusals will suffice but more in P1
+
+FP1 = Union({{(<>,X) | X <- {{},{a},{b}}},
+             {(<b>,X)| X <- {{},{b}}},
+             {(<b,a>,X)| X <- PS},
+             {(<a,a>,X)| X <- PS}})
+
+-- traces
+TP1 = {<>,<a>,<a,a>,<b>,<b,a>}
+
+-- minimal divergences
+DP1 = {<a>}
+
+-- To show the model works
+
+SFMSimP1 = SFMProc((TP1,FP1))
+
+assert P1 [F= SFMSimP1
+assert SFMSimP1 [F= P1
+            
+-----
+
+P2 = (a -> DIV) [> (b -> (a -> STOP [] b -> DIV [] b -> STOP)) 
+
+TP2 = {<>,<a>,<b>,<b,a>,<b,b>}
+DP2 = {<a>,<b,b>}
+FP2 = {(<>,{}),(<>,{a}),(<b>,{}),(<b,a>,X),(<b,b>,X) | X <- PS}
+
+SFMSimP2 = SFMProc((TP2,FP2))
+
+assert P2 [F= SFMSimP2
+assert SFMSimP2 [F= P2
+            
+
+-- Failures divergences model
+-- The construction above doesn't work for the failures divergences
+-- model since the processes in it diverge a great deal.
+
+-- The absence of a "top" under refinement means there is no similar
+-- alternative.  We have to treat the whole set of behaviours at once:
+
+FDMProc((F,D)) = 
+if member(<>,D) then DIV else
+let nexts = {(x,({(s,X) | (<y>^s,X) <- F, y==x}, {s | <y>^s <- D, y==x})) 
+                | x <- inits}
+    nx(x) = let {n} = {n' | (x',n') <- nexts, x==x'}
+            within FDMProc(n)
+    inits = union({y | (<y>^s,X) <- F},{y|<y>^s <- D})
+    accs = {diff(inits,X) | (<>,X) <- F}
+within
+ (([] (x,P):nexts @ x -> FDMProc(P))
+ [>
+ (|~| A:accs @ ([] x:A @ x -> nx(x))))
+
+FDMSimP1 = FDMProc((FP1,DP1))
+
+assert P1 [FD= FDMSimP1
+assert FDMSimP1 [FD= P1
+
+FDMSimP2 = FDMProc((FP2,DP2))
+
+assert P2 [FD= FDMSimP2
+assert FDMSimP2 [FD= P2
+

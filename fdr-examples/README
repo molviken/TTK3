@@ -1,0 +1,13 @@
+This folder contains a number of example files that are FDR3 compatible.
+The file intro.csp in this directory includes a basic introduction to FDR3.
+
+The remaining files are organised into several subdirectories, as follwos:
+
+* priority_and_time contains scripts that demonstrate the use of timed CSP
+  and prioritise, as introduced in FDR2.94.
+
+* tpc contains FDR3-compatible versions of the scripts from "The Theory and
+  Practice of Concurrency".
+
+* ucs contains FDR3-compatible versions of the scripts from "Understanding
+  Concurrent Systems".

@@ -1,0 +1,83 @@
+T = {0}
+D = 4
+Bit = {0,1}
+
+channel left,right:T
+channel a,b:Bit.T
+channel c,d:Bit
+channel loss,dup
+channel tock
+et(x) = if member(x,Errors) then 0 else 1
+
+Timed(et){
+
+AC(s) = d.s -> AC(s)
+
+S(s) = AC(1-s) /\ left?x -> S'(s,x,0)
+
+S'(s,x,n) = AC(1-s) /\ S''(s,x,n)
+
+S''(s,x,n) = d.s -> S(1-s)
+             [] (WAIT(n);a.s.x -> S'(s,x,D))
+
+R(s) = b!(1-s)?x -> c.(1-s) -> R(s)
+       [] b!s?x -> right!x -> c!s -> R(1-s)
+
+
+CE(in,out) = in?x -> CE'(in,out,x)
+
+CE'(in,out,x) = out!x -> CE(in,out)
+                [] dup -> out!x -> CE'(in,out,x)
+                [] loss -> CE(in,out)
+
+Errors = {dup,loss}
+
+System = wbisim(pri(((S(0) [|{|a,d|}|](CE(a,b) ||| CE(c,d))) [|{|b,c|}|] R(0))\{|a,b,c,d|}))
+
+FSystem = wbisim(pri(rpri((S(0) [|{|a,d|}|](CE(a,b) ||| CE(c,d))) [|{|b,c|}|] R(0))\{|a,b,c,d,left|}))
+
+rpri(P) = prioritise(P,<{|right|},diff(Events,{|right|})>)
+ER(N) = [] x:Errors @ x -> WAIT(N);ER(N)
+
+MER(N,0) = STOP
+MER(N,1) = ER(N)
+MER(N,m) = sbisim(MER(N,m-1)|||ER(N))
+
+RegSys(N,M) = System [|Errors|] MER(N,M)
+RegFSys(N,M) = FSystem [|Errors|] MER(N,M)
+
+
+COPY(R) = left?x -> (|~| i:{0..R-1} @ (WAIT(i);right!x -> COPY'(R)))
+
+COPY'(R) = |~| i:{0..R-1} @ WAIT(i); COPY(R)
+
+
+}
+LaRs(N,M) = (RegSys(N,M) [|union(Errors,{tock})|]normal(TCHAOS(Errors)))\Errors
+LaFs(N,M) = (RegFSys(N,M) [|union(Errors,{tock})|]normal(TCHAOS(Errors)))\Errors
+
+TCHAOS(X) = ([] x:X @ x -> TCHAOS(X))[> tock -> TCHAOS(X)
+
+assert pri(COPY(3)) [F= LaRs(1,0)
+assert pri(COPY(4)) [F= LaRs(1,0)
+assert pri(COPY(10)) [F= LaRs(6,1)
+assert pri(COPY(11)) [F= LaRs(6,1)
+assert pri(COPY(15)) [F= LaRs(11,2)
+assert pri(COPY(16)) [F= LaRs(11,2)
+assert pri(COPY(20)) [F= LaRs(16,3)
+assert pri(COPY(21)) [F= LaRs(16,3)
+assert pri(COPY(25)) [F= LaRs(21,4)
+assert pri(COPY(26)) [F= LaRs(21,4)
+assert pri(COPY(30)) [F= LaRs(26,5)
+assert pri(COPY(31)) [F= LaRs(26,5)
+
+assert LaFs(5,1)\diff(Events,{|right|}) :[livelock-free]
+assert LaFs(6,1)\diff(Events,{|right|}) :[livelock-free]
+assert LaFs(7,1)\diff(Events,{|right|}) :[livelock-free]
+
+external prioritise_nocache
+prioritise = prioritise_nocache
+transparent sbisim,wbisim,normal
+
+pri(P) = prioritise(P,<{},{tock}>)
+

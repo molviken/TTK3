@@ -1,0 +1,139 @@
+-- abp-sfm.csp
+
+-- The alternating bit protocol studied in the stable failures model
+
+-- Bill Roscoe
+
+-- This file follows on from the initial presentation in the file
+-- abp.csp (chapter5), and illustrates how reasoning in the
+-- stable failures model can give useful results where the
+-- elimination of divergence is troublesome.
+
+--$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-$$-
+
+-- The following material is simply copied from the earlier file:
+
+-- CHANNELS and DATA TYPES
+-- left and right are the external input and output, which we set to
+-- one-bit.  a and b carry a tag and a data value.
+-- c and d carry an acknowledgement tag.  In this protocol tags are bits.
+
+DATA = {0,1}  -- in a data-independent program, where nothing is done to
+              -- or conditional on data, this is sufficient to establish
+              -- correctness
+TAG = {0,1}   -- the alternating bits.
+
+channel left,right:DATA
+channel a,b:TAG.DATA
+channel c,d:TAG
+
+-- The overall specification we want to meet is that of a buffer.  The
+-- most nondeterministic (left-to-right) buffer with size bounded by N is
+-- given by BUFF(<>), where
+
+BUFF(s) = if (null(s)) then (left?x -> BUFF(<x>))
+          else  ((right!(head(s)) -> BUFF(tail(s)))
+                 [](STOP |~| (if ((#s)==N) then STOP
+                              else (left?x -> BUFF(s^<x>)))))
+
+-- For our purposes we will set
+
+N = 3  -- since this example does not introduce more buffering than this.
+
+SPEC = BUFF(<>)
+
+-- We can replace the channels E and F of the previous file by ones
+-- that can commit an arbitrary number of errors (loss or duplication):
+
+C(in,out) = in?x -> C'(in,out,x)
+
+C'(in,out,x) = out!x -> C'(in,out,x)
+            |~| in?y -> C'(in,out,y)
+
+E = C(a,b)
+
+F = C(c,d)
+
+-- The implementation of the protocol consists of a sender process and
+-- receiver process, linked by E and F above.  
+
+-- The sender process is parameterised by the current value it tries to send
+-- out, which may be null in which case it does not try to send it,  but
+-- instead accepts a new one from channel left.
+
+Null=99  -- any value not in DATA
+
+SEND(v,bit) = (if (v == Null) then 
+                (left?x -> SEND(x,(1-bit))) else 
+                (a!bit!v -> SEND(v,bit)))
+              [](d?ack ->(if (ack==bit) then SEND(Null,bit) 
+                        else SEND(v,bit)))
+
+-- Initially the data value is Null & bit=1 so the first value input gets bit=0.
+
+SND = SEND(Null,1)
+
+-- In this version of the protocol we will consider only the
+-- receiver that alternates messages and acks
+
+RECimp(bit) = b?tag?data -> (if (tag==bit) then 
+                                         (right!data -> c!tag -> RECimp(1-bit))
+                                       else (c!tag -> RECimp(bit)))
+
+RCVimp=RECimp(0)
+
+
+SYSTEM = SND[|{|a,d|}|]((E|||F)[|{|b,c|}|]RCVimp)\{|a,b,c,d|}
+
+-- This process can diverge due to infinite sequences of errors:
+
+assert SYSTEM :[divergence free]
+
+-- but does meet its specification over the stable failures model
+
+assert SPEC [F= SYSTEM
+
+-- We can therefore be sure that any refinement of SYSTEM which is
+-- divergence free will failures/divergences refine SPEC (as discussed
+-- in the text).  This, of course, is true of the system
+-- built with the same media used in the original file:
+
+L = 3
+
+E'(n) = a?tag?data -> (if (n==0) then (b!tag!data -> E'(L-1))
+                        else ((b!tag!data -> E'(L-1)) |~|  E'(n-1)))
+
+F'(n) = c?tag -> (if (n==0) then (d!tag -> F'(L-1))
+                        else ((d!tag -> F'(L-1)) |~|  F'(n-1)))
+
+assert E [FD= E'(L-1)
+assert F [FD= F'(L-1)
+
+-- The system with the refined channels is
+
+SYSTEM' = SND[|{|a,d|}|]((E'(L-1)|||F'(L-1))[|{|b,c|}|]RCVimp)\{|a,b,c,d|}
+
+-- We can be sure, therefore, that the only thing this is relying on
+-- the refined E and F for is avoiding livelock.  We can also gain
+-- a practical benefit in terms of state size.  It is intuitively 
+-- obvious that SYSTEM' does not depend in any way on exactly what
+-- values it is carrying when deciding whether it can diverge.  This
+-- is made concrete in Section 15.2.2 of the book, where it is shown
+-- that a single value will suffice in systems like this one whenever the
+-- specification does not refer to the pattern of values carried.
+
+-- Therefore, in order to prove SYSTEM' divergence-free it is sufficient
+-- to consider the case where it only inputs 0's:
+
+assert InZero [|{|left|}|] SYSTEM' :[divergence free]
+
+InZero = left.0 -> InZero
+
+-- So you can actually prove the refinement
+
+assert SPEC [FD= SYSTEM'
+
+-- using two checks which are both significantly smaller than this one itself.
+-- Clearly this might be a significant factor with larger protocols
+-- (or large L in this one).  In fact the low buffering of this protocol
+-- makes the InZero composition less beneficial here than it usually is.

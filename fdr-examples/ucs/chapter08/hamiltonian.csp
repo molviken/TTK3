@@ -1,0 +1,47 @@
+-- hamiltonian.csp
+
+-- A.W. Roscoe
+
+-- Illustrating the use of parallel set processes by searching
+-- for a Hamiltonian path in a grid: see Section 8.2
+
+-- The size of the rectangular grid
+
+M = 5
+N = 6
+
+start = (1,1)
+
+T = {(m,n) | m <- {1..M}, n <- {1..N}}
+
+channel move:  T
+
+channel done
+
+
+Ant((m,n)) = (n>1)& move.(m,n-1) -> Ant((m,n-1))
+             [] (n<N)& move.(m,n+1) -> Ant((m,n+1))
+             [] (m>1)& move.(m-1,n) -> Ant((m-1,n))
+             [] (m<M)& move.(m+1,n) -> Ant((m+1,n))
+
+Present(x) = move!x -> Absent(x)
+
+
+Absent(x) = done -> Absent(x)
+
+ParSet(X) = [|{done}|] i:T @ (if member(i,X) then Present(i)
+                                                else Absent(i))
+
+System = Ant(start) [|{|move|}|]ParSet(T)
+
+assert STOP [T= System\Events
+assert NoHamiltonian [T= System
+
+NoHamiltonian = move?(i,j) -> if (i,j)==start then NoHamiltonian'
+                              else NoHamiltonian
+
+NoHamiltonian' = move?_ -> NoHamiltonian
+
+-- i.e. done not permitted immediately after move to start
+
+

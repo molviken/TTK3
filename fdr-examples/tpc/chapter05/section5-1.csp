@@ -1,0 +1,206 @@
+-- section5-1.csp 
+
+-- buffers
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of some of the main CSP processes in Section 5.1 of those into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE.  
+
+
+-- We need a type for our various buffers.  Most of the time (for good
+-- technical reasons discussed in Section 15.2.2) it is best to make this
+-- size 2:
+
+T = {0,1}
+
+-- The most nondeterministic buffer is the process  BUFF(<>), where
+
+channel left,right:T
+
+BUFF(<>) = left?x -> BUFF(<x>)
+
+BUFF(s^<a>) = (left?x -> BUFF(<x>^s^<a>) |~| STOP)
+               [] right!a -> BUFF(s)
+
+-- As discussed in the text, this process is infinite-state, and so we
+-- often use bounded approximations which are either more refined buffers:
+
+BBUFF(N,<>) = left?x -> BBUFF(N,<x>)
+
+BBUFF(N,s^<a>) = #s < N-1 & (left?x -> BBUFF(N,<x>^s^<a>) |~| STOP)
+               [] right!a -> BBUFF(N,s)
+
+-- or weak buffers that go bottom once they are over-filled
+
+WBUFF(N,<>) = left?x -> WBUFF(N,<x>)
+
+WBUFF(N,s^<a>) = (left?x -> (if #s==N-1 then BOTTOM else WBUFF(N,<x>^s^<a>))
+                  |~| STOP)
+               [] right!a -> WBUFF(N,s)
+
+-- The following is an right bottom for failures/divergences refinement
+
+BOTTOM = BOTTOM |~| CHAOS(Events)
+
+-- that also works in other models.
+
+-- So, for example, you can verify
+
+assert WBUFF(4,<>) [FD= WBUFF(5,<>)
+
+assert BBUFF(5,<>) [FD= BBUFF(4,<>)
+
+-- As set out in the text, every buffer will refine all WBUFF's,
+-- and anything that refines any BBUFF is a buffer.  Furthermore
+-- any finite-state process that is a buffer will refine some BBUFF
+-- and any that is not one will fail to refine some WBUFF.
+
+-- It is, of course, possible that this decision procedure will be
+-- made impractical by the state-space growth of these processes, though
+-- this is only likely when facing a system that inputs highly selectively
+-- when non-empty.
+
+--$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&$%&
+
+-- Example 5.1.1
+
+-- Overcoming corruption
+
+E(0) = left?x -> (right!x -> E(0) |~| right!(1-x) -> E(2))
+
+E(n) = left?x -> right!x -> E(n-1)
+
+-- we can indeed check
+
+assert E(0) [FD= E(1)
+assert E(1) [FD= E(2)
+
+-- The triplicate and majority voting can be written:
+
+Smaj = left?x -> right!x -> right!x -> right!x -> Smaj
+
+Rmaj = left?x -> left?y -> left?z -> right!(x+y+z)/2 -> Rmaj
+
+-- The entire system becomes
+
+MajSys = (Smaj [right <-> left] E(0)) [right <-> left] Rmaj
+
+-- We can experiment with this to see if it is a buffer: if we try BBUFF(1)
+-- then it fails as it can become too full:
+
+assert BBUFF(1,<>) [FD= MajSys
+
+-- but the next one up succeeds
+
+assert BBUFF(2,<>) [FD= MajSys
+
+-- showing that this system is a buffer that never holds more than two
+-- items.
+
+-- An interesting thing you can show on FDR is that MajSys is deterministic:
+
+assert MajSys :[deterministic]
+
+-- because this is in spite of the highly nondeterministic component E(0)
+-- that it uses.
+
+-- It will be clear when you run these checks that FDR finds this sort of proof
+-- easier than humans find the formal analysis in the text.  You can try some
+-- rather more complex problems, such as potential message loss and/or
+-- duplication as well as or instead of corruption.
+
+--%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+%*+
+
+-- Example 5.1.2 (Parity bits)
+
+IP(b,8) = right!b -> IP(0,0)
+IP(b,n) = left?x -> right!x -> IP((b+x)%2,n+1)
+
+CP(b,8) = left!b -> CP(0,0)
+CP(b,n) = left?x -> right!x -> CP((b+x)%2,n+1)
+
+-- like the previous example, this gives a buffer bounded by 2:
+
+assert BBUFF(2,<>) [FD= IP(0,0) [right <-> left] CP(0,0)
+
+-- The operation of this checking can be shown by testing the
+-- following process for deadlock:
+
+assert (IP(0,0) [right <-> left] E(0)) [right <-> left] CP(0,0) :[deadlock free] 
+
+-- It deadlocks when the parity bit goes wrong because of E(0)'s capability
+-- to corrupt.  Naturally, however, when we replace the E(0) here by
+-- MajSys:
+
+ParAndMaj = (IP(0,0) [right <-> left] MajSys) [right <-> left] CP(0,0)
+
+-- it is not only deadlock free but also a buffer
+
+assert ParAndMaj :[deadlock free] 
+
+assert BBUFF(4,<>) [FD= ParAndMaj
+
+-- In running these you will see the extent to which running one system
+-- built in terms of the other can multiply state spaces.  This can
+-- be avoided by using the "modular compression" strategy described
+-- in Section C.2.  In the present case it is appropriate to
+-- compress MajSys before inserting it into the parity system:
+
+transparent normal
+
+ParAndNMaj = (IP(0,0) [right <-> left] normal(MajSys)) [right <-> left] CP(0,0)
+
+-- the same checks on this equivalent system
+
+assert ParAndNMaj :[deadlock free] 
+
+assert BBUFF(4,<>) [FD= ParAndNMaj
+
+--(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)(#)
+
+-- The Bplus recursion is in chapter4/infexamples.csp  
+
+-- The function of this recursion is
+
+F(P) = left?x -> (COPY [right <-> left] right!x -> P)
+
+COPY = left?x -> right!x -> COPY
+
+-- We can't prove that Bplus is a buffer directly, because it is infinite
+-- state, or by fixed-point induction, because it doesn't satisfy any
+-- BBUFF(n) and because BUFF is infinite state.  You can, however prove
+-- that it is a weak buffer of any chosen capacity small enough
+-- to run: for example
+
+assert WBUFF(5,<>) [FD= F(WBUFF(5,<>))
+
+-- and that it is deadlock-free
+
+DF(X) = |~| x:X @ x -> DF(X)
+
+-- For while the following check fails
+
+assert DF({|left,right|}) [FD= F(DF({|left,right|}))
+
+-- the checks
+
+IorO = left?x -> IorO
+       |~| (|~| x:T @ right!x -> IorO)
+
+assert IorO [FD= F(IorO)
+assert DF({|left,right|}) [FD= IorO
+
+-- succeed, proving that IorO [FD= Bplus by fixed-point induction and
+-- hence DF [FD= Bplus
+
+-- See if you can work out what IorO says any why it works where DF
+-- fails.  This is, of course, an example of a general principle of
+-- induction: sometimes you have to strengthen your inductive hypothesis
+-- to get it to work.
+
+
+
+

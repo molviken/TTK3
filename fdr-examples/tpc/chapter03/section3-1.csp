@@ -1,0 +1,126 @@
+-- section3-1.csp 
+
+-- illustrating hiding
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of some of the main CSP processes in Section 3.1 of those into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE.  
+
+
+-- The following definitions are copied from section2-2.csp
+
+T = {0,1}
+
+
+COPY'(a,b) = a?x -> b!x -> COPY'(a,b)
+
+
+channel dd:Int.T
+
+BCHAIN(N) = || i:{0..N-1} @ [{|dd.i,dd.i+1|}] COPY'(dd.i,dd.i+1)  
+
+-- We get the hidden version defined
+
+HCHAIN(N) = BCHAIN(N)\{|dd.i | i <- {1..N-1}|}
+
+-- A tail-recursive N-place buffer is defined
+
+BN(a,b,N,s) = #s<N & a?x -> BN(a,b,N,s^<x>) 
+           [] #s>0 & b!head(s) -> BN(a,b,N,tail(s)) 
+
+-- and you can check the equivalence (for chosen N):
+
+assert BN(dd.0,dd.5,5,<>) [FD= HCHAIN(5)
+assert HCHAIN(6) [FD= BN(dd.0,dd.6,6,<>)
+
+-- (Note that we have used full, failures-divergences, refinement as
+-- described in Section 3.3, but traces would also work, of course.)
+
+--&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+-- Copied from section2-2.csp (with slightly reduced datatypes)
+
+-- The ATM and customer with extended interface:
+
+CARD = {1..3}
+
+datatype pinnumbers = PIN.Int
+
+fpin(c) = PIN.c
+
+PINs = {fpin(c) | c <- CARD}
+
+WA = {50,100}
+
+SpendA = {1..60}
+
+S(1) = {PIN.1,PIN.2}  -- A customer who correctly remembers his
+                            -- PIN amongst others
+
+S(2) = {PIN.1,PIN.3}  -- A customer who does't.
+
+S(n) = {PIN.n}        -- All others are unambiguously right.
+
+
+channel incard, outcard:CARD
+channel pin:PINs
+channel req, dispense:WA
+channel spend:SpendA
+channel refuse
+channel refill
+
+Max = 350 -- The capacity of the ATM
+
+ATMref(n) = (n<Max) & refill -> ATMref(Max)
+            [] incard?c -> pin.fpin(c) -> req?w ->
+                (if w<=n then dispense!w -> outcard.c -> ATMref(n-w)
+			 else refuse -> outcard.c -> ATMref(n))
+
+
+
+CUSTspend(card,0) = incard.card -> pin?p:S(card) -> req.50 ->
+              (dispense?x:{y | y <- WA, y >=50} -> 
+		      outcard.card -> CUSTspend(card,50)
+	      [] refuse -> outcard.card -> CUSTspend(card,0))
+
+CUSTspend(card,n) = |~| x:{x | x <- SpendA, x<=n} @ 
+                          spend.x -> CUSTspend(card,n-x)
+
+-- Here is ATM2 from chapter1.csp
+
+ATM2 = incard?c -> pin.fpin(c) -> req?n ->
+         ((dispense!n -> outcard.c -> ATM2)
+		  |~| (refuse -> (ATM2 |~| outcard.c -> ATM2)))
+
+-- and CUST2 from section2-1.csp
+
+CUST2(card) = incard.card -> pin?p:S(card) -> req.50 ->
+              (dispense?x:{y | y <- WA, y >=50} -> outcard.card -> CUST2(card)
+			    [] refuse -> outcard.card -> CUST2(card))
+
+-- as mentioned in the text, the result of hiding {|spend|} in CUSTspend
+-- is precisely CUST2, and the result of hiding {refill} in ATMref
+-- is a refinement of ATM2 (both of these apply independent of the
+-- money parameter)
+
+assert CUST2(3) [FD= CUSTspend(3,0)\{|spend|} 
+assert CUSTspend(3,0)\{|spend|} [FD= CUST2(3) 
+assert ATM2 [FD= ATMref(0)\{refill} 
+
+-- that the last refinement is not an equivalence is demonstrated by the
+-- failure of
+
+
+assert ATMref(0)\{refill} [FD= ATM2 
+
+-- this last check can be made very slow by the normalization phase
+-- because of the subtle nondeterminism that the specification can
+-- exhibit because of the interaction between withdrawals and refills.
+-- The datatypes used in this file do not pose an obstacle, but larger
+-- parameters can.  This type of behaviour is much more common in examples
+-- where, like this one, the process on the left-hand side of a refinement
+-- is not designed as a specification and contains subtle nondeterminism.
+

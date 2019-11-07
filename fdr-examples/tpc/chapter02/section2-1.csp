@@ -1,0 +1,136 @@
+-- section2-1.csp (FDR2 version)
+
+-- illustrating synchronous parallel
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of all the main CSP processes in Section 2.1 of those into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE
+
+-- First, some material more-or-less copied from chapter1.csp, defining
+-- some of the sequential processes from there that we want to re-use.
+
+channel a,b
+
+-- This time we will use the entire set Events for REPEAT:
+
+Sigma = Events
+
+
+REPEAT = [] x:Sigma @ x -> x -> REPEAT
+
+-- The definition of the ATM processes again:
+
+CARD = {1..10}
+
+datatype pinnumbers = PIN.Int
+
+fpin(c) = PIN.c
+
+PINs = {fpin(c) | c <- CARD}
+
+WA = {10,20,30,40,50,60,70,80,90,100}
+
+
+channel incard, outcard:CARD
+channel pin:PINs
+channel req, dispense:WA
+
+ATM1 = incard?c -> pin.fpin(c) -> req?n ->
+         dispense!n -> outcard.c -> ATM1
+
+
+-- The nondeterministic ATM requires an extra channel
+
+channel refuse
+
+ATM2 = incard?c -> pin.fpin(c) -> req?n ->
+         ((dispense!n -> outcard.c -> ATM2)
+         |~| (refuse -> (ATM2 |~| outcard.c -> ATM2)))
+
+--%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+-- The synchronous parallel operator has no individual representation
+-- machine-readable CSP, but can be written either [Events||Events]
+-- or [|Events|] (using respectively the alphabetized and interface
+-- parallel operators described later in Chapter 2.  Thus
+-- what appears in the text as (a -> REPEAT || REPEAT) becomes
+
+REPEATa = (a -> REPEAT) [|Events|] REPEAT
+
+-- This can be proved trace (or, indeed either of the other equivalences
+-- FDR supports) equivalent to
+
+AS = a -> AS
+
+assert AS [T= REPEATa
+assert REPEATa [T= AS
+
+--%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+-- We will parameterize the process CUST1 with his/her card number:
+
+CUST1(card) = incard.card -> pin?p:S(card) -> req.50 ->
+              dispense?x:{y | y <- WA, y >=50} -> outcard.card -> CUST1(card)
+
+-- Note that the remembered set of PIN's has also become a parameterized
+-- object: a function.  Let's define
+
+S(1) = {PIN.1,PIN.4,PIN.7}  -- A customer who correctly remembers his
+                            -- PIN amongst others
+
+S(2) = {PIN.1,PIN.3,PIN.7}  -- A customer who does't.
+
+S(n) = {PIN.n}              -- All others are unambiguously right.
+
+-- The combination of the nth customer and ATM1 is
+
+ATM1andCUST1(card) = ATM1 [|Events|] CUST1(card)
+
+-- You can see the effects of the different sets of PIN's either
+-- animating this with varying card, or by comparing it with the 
+-- process defined in the book:
+
+SeqATMC(card) = incard.card -> pin.fpin(card) -> req.50 -> dispense.50 -> 
+                outcard.card -> SeqATMC(card)
+
+-- This `specification' is always trace-refined by the parallel combination, 
+-- for example
+
+assert SeqATMC(1) [T= ATM1andCUST1(1)
+assert SeqATMC(2) [T= ATM1andCUST1(2)
+
+-- and the reverse holds when the PIN is remembered
+
+assert ATM1andCUST1(1) [T= SeqATMC(1)
+
+-- but not when it isn't
+
+assert ATM1andCUST1(2) [T= SeqATMC(2)
+
+-- The fact that the inability to remember your PIN causes deadlock
+-- is revealed in the contrast between the deadlock-freedom checks
+
+assert ATM1andCUST1(2) :[deadlock free [F]]
+assert ATM1andCUST1(3) :[deadlock free [F]]
+
+-- The potential for deadlock in the combination between CUST1 and
+-- ATM2 (even when the PIN is remembered) is shown in the failure
+-- of the check
+
+assert (ATM2[|Events|]CUST1(3)) :[deadlock free [F]]
+
+-- The process CUST2 accepts refusal events:
+
+CUST2(card) = incard.card -> pin?p:S(card) -> req.50 ->
+              (dispense?x:{y | y <- WA, y >=50} -> outcard.card -> CUST2(card)
+	      [] refuse -> outcard.card -> CUST2(card))
+
+ATM2andCUST2(card) = ATM2[|Events|]CUST2(card)
+
+-- Of course, it can still deadlock as described in the text:
+
+assert ATM2andCUST2(3) :[deadlock free [F]]
+

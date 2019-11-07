@@ -1,0 +1,95 @@
+-- TCOPY.csp
+
+-- simple timed examples
+
+-- A.W. Roscoe
+
+-- This file simply repeats the material in section14-2.csp from TPC
+
+-- Most of the processes in this file are based on timed versions of COPY
+
+DATA = {0,1}
+
+channel left,right,mid:DATA
+
+channel tock
+
+COPY = left?x -> right!x -> COPY
+
+-- The first timed version simply inputs and outputs on a fixed schedule
+
+TCOPY1 = left?x -> tock -> right!x -> tock -> TCOPY1
+
+-- The second behaves essentially like the untimed version
+
+TCOPY2 = left?x -> tock -> TCOPY2'(x)
+      [] tock -> TCOPY2
+
+TCOPY2'(x) = right!x -> tock -> TCOPY2
+          [] tock -> TCOPY2'(x)
+
+-- The third will wait for an input but not for an output
+
+TCOPY3 = left?x -> tock -> right!x -> tock -> TCOPY3
+      [] tock -> TCOPY3
+
+-- The following process TLimiter(n,m) allows up to m other events in
+-- the first n time units, and no constraints thereafter.
+
+TLimiter(0,m) = RUN(Events)
+
+TLimiter(n,m) = m>0 & [] x:diff(Events,{tock}) @ x -> TLimiter(n,m-1)
+             [] tock -> TLimiter(n-1,m)
+
+RUN(X) = [] x:X @ x -> RUN(X)
+
+-- So, for example 
+
+LTC1 = TCOPY1 [|Events|]TLimiter(12,13)
+
+-- is consistent, but
+
+LTC2 = TCOPY1 [|Events|]TLimiter(12,10)
+
+-- is not since TCOPY1 insists on performing events at times when
+-- the limiter will not let it.  It gives a time-stop.
+
+TOCKS = tock -> TOCKS
+
+assert TOCKS [FD= LTC1\diff(Events,{tock})
+assert TOCKS [FD= LTC2\diff(Events,{tock})
+
+-- Version of TCOPY3 parameterized by transmission delay
+
+TCOPY4(in,out,d) = in?x -> TCOPY4'(in,out,d,d,x)
+                [] tock -> TCOPY4(in,out,d)
+
+TCOPY4'(in,out,d,0,x) = out!x -> tock -> TCOPY4(in,out,d)
+
+TCOPY4'(in,out,d,n,x) = tock -> TCOPY4'(in,out,d,n-1,x)
+
+-- Connecting two of these is fine when the left-hand one recovers
+-- slower:
+
+assert TOCKS [FD= (TCOPY4(left,mid,5) [|{|mid,tock|}|] 
+                   TCOPY4(mid,right,4))\{|left,right,mid|}
+
+-- but creates a time-stop when the left-hand one recovers faster
+-- as the right-hand process may not be ready for the output
+-- when it has to happen
+
+assert TOCKS [FD= (TCOPY4(left,mid,4) [|{|mid,tock|}|] 
+                   TCOPY4(mid,right,7))\{|left,right,mid|}
+
+
+-- If the actions in a set
+
+D = {|left|}
+
+-- are deemed delayable by the environment then we do not want to
+-- rely on them happening to avoid time-stops.  We therefore use a
+-- stronger version of the timing consistency check.  With this choice,
+-- TCOPY1 becomes inconsistent but TCOPY3 remains consistent
+
+assert TOCKS [FD= (TCOPY1 [|D|] CHAOS(D))\diff(Events,{tock})
+assert TOCKS [FD= (TCOPY2 [|D|] CHAOS(D))\diff(Events,{tock})

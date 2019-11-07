@@ -1,0 +1,44 @@
+-- apples.csp
+
+-- Illustrating the technique of using many-way renaming to
+-- achieve a variable mapping on event: here apple is mapped to
+-- braeburn or cox depending on which of the events adam and eve
+-- happened last.
+
+channel adam, eve, apple, braeburn, cox
+
+-- Defining a candidate process for the renaming
+
+Apples = apple -> Apples
+
+People = adam -> eve -> STOP
+
+P = Apples ||| People
+
+-- The regulator process that makes the choice.
+
+Reg = adam -> Reg
+      [] eve -> Reg'
+      [] braeburn -> Reg
+
+Reg' = adam -> Reg
+       [] eve -> Reg'
+       [] cox -> Reg'
+
+-- The mapping
+
+RelP = P[[apple <- cox, apple <- braeburn]][|{|adam,eve,cox,braeburn|}|]Reg
+
+-- The following specification asserts that all A's come before any B
+-- for disjoint sets of events A and B
+
+Before(A,B) = ([] x:diff(Events,B) @ x -> Before(A,B))
+              [] 
+              ([] x:B @ x -> RUN(diff(Events,A)))
+
+RUN(B) = [] x:B @ x -> RUN(B)
+
+-- With our example process one will succeed and one will fail:
+
+assert Before({cox},{braeburn}) [T= RelP
+assert Before({braeburn},{cox}) [T= RelP

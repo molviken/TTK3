@@ -1,0 +1,236 @@
+
+-- Sliding window protocol, Timed version
+
+-- Bill Roscoe, August 1992...adapted and extended 2010
+
+-- Timed CSP added 2012
+
+-- This is second in a set of protocol presentations dealing with
+-- a pair of lossy channels.  It follows on from the alternating bit
+-- protocol in abp.csp, with which it has quite a lot in common.
+
+-- This version presents a simple version of the protocol with the windows
+-- rotating in a finite space of twice their length.
+
+-- CHANNELS AND DATA TYPES
+-- left and right are the external input and output, which we set to
+-- one-bit.  a and b carry a tag and a data value.
+
+-- W is the width of the "window"
+
+W = 4
+
+DATA = {0}
+TAG = {0..N-1}
+
+channel left,right,mid:DATA
+channel a,b:TAG.DATA
+channel c,d:TAG
+channel loss, dup
+channel tock
+Errors = {loss,dup}
+
+-- The overall specification we want to meet is that of a buffer.  The
+-- most nondeterministic (left-to-right) buffer with size bounded by N is
+-- given by BUFF(<>), where
+
+BUFF(s) = if (s==<>) then (left?x -> BUFF(<x>))
+          else  ((right!(head(s)) -> BUFF(tail(s)))
+                 [](STOP |~| (if ((#s)==B) then STOP
+                              else (left?x -> BUFF(s^<x>)))))
+
+
+TReg(X,Wt,0) = tock -> TReg(X,Wt,0) 
+            [] ([] x:X @ x -> TReg(X,Wt,Wt))
+
+TReg(X,Wt,n) = tock -> TReg(X,Wt,n-1)
+            [] (STOP |~| ([] x:X @ x -> TReg(X,Wt,Wt)))
+
+TBUFF(Wt) = BUFF(<>) [|{|left,right|}|] TReg({|left,right|},Wt,0)
+
+-- Creates a timed version of the failures specifications in which all
+-- offers are only enforced at least W tocks from the previous non-tock
+-- action.
+
+-- For our purposes we will set
+
+B = 2*W+1
+       -- The maximum buffering introduced by this implementation.
+       -- Increasing the window size or introducing more buffering at
+       -- input or output would increase this.  Including 1 for COPY
+
+N = 2*W -- The period with which the indexes rotate
+
+
+
+-- The protocol is designed to work in the presence of lossy channels.
+-- Here we use the "controlled error model" set out in Chapter 4 of UCS 
+-- and Chapter 12 of TCP
+
+et(x) = if member(x,union(Errors,{ok})) then 0 else 1
+
+Timed(et){
+E = a?tag?data -> (loss -> E
+                   [] b!tag!data -> E'(tag,data))
+
+E'(tg,dt) = (dup -> b!tg!dt -> E'(tg,dt))
+          [] 
+           E
+
+F = c?tag -> (loss -> F
+              [] d!tag -> F'(tag))
+
+F'(tg) = (dup -> d!tg -> F'(tg))
+        [] F
+
+
+-- The implementation of the protocol consists of a sender process and
+-- receiver process, linked by E and F above.  They each have a picture
+-- of part of the sequence of values.  A value may not be present for
+-- various reasons, so we need a Null value.
+
+Null = 99  -- any value not in DATA
+
+
+-- In this version the window has length W and the counter cycles round
+-- 0,..,2*W-1.  
+
+-- The sender's state is a W-length sequence of message values or Null,
+-- combined with an index in the range mod N.
+
+-- The values are organised oldest first, with a slot being
+-- Null if it has already been acked.  We can input a new value if the
+-- oldest has been acked, in which case we must advance n.
+
+-- Because timing matters in this version we add an extra parameter to
+-- SEND, namely the most recent sent slot, so we can rotate them.
+
+SEND(sw,n,last) = (head(sw)==Null&left?x -> SEND(tail(sw)^<x>,(n+1)%N,last))
+             [] (d?v -> let (x,y) = ack(sw,n,v) within SEND(x,y,last))
+             [](nonempty(sw,n)&let (r,v) = next(sw,n,last)
+                               within a.r.v -> SEND(sw,n,r))
+
+nonempty(sw,n) = (card(sends(sw,n))>0)
+
+next(sw,n,last) = let ss = sends(sw,n)
+                      ss1 = {(r,x) | (r,x) <- ss, r > last}
+                      ss2 = diff(ss,ss1)
+                  within
+                      if card(ss1) > 0 then minp(ss1) else minp(ss2)
+
+
+minp(S) = let {(r,x)} = {(r,x) | (r,x) <- S, card({r' | (r',_) <- S, r'<r})==0}
+          within (r,x)
+
+
+-- In RCV we have a similar state...
+
+
+RCV((rw,n)) = if (head(rw)!=Null) then 
+                     right!head(rw) -> RCV((tail(rw)^<Null>,(n+1)%N))
+                     else b?t?v -> c!t ->  RCV((update((t+N-n)%N,v,rw),n))
+
+
+
+sends(<>,n) = {}
+sends(s^<x>,n) = if x==Null then sends(s,(n+N-1)%N)
+                 else union({(n,x)},sends(s,(n+N-1)%N))
+
+ack(sw,n,v)=  (nullify((n-v+N)%N,sw),n) 
+
+nullify(n,<>) = <>
+nullify(0,s^<x>) = s^<Null>
+nullify(n,s^<x>) = nullify(n-1,s)^<x>
+
+update(n,v,<>) = <>
+update(0,v,<x>^s) = <v>^s
+update(n,v,<x>^s) = <x>^update(n-1,v,s) 
+
+SND = wbisim(SEND(blanks,N-1,N-1))
+blanks = <Null | i <- <0..W-1>>
+
+
+
+
+
+
+RCVA = wbisim(RCV((blanks,0)))
+
+
+System = (pri(SND[|{|a,d|}|]((E|||F)[|{|b,c|}|]RCVA)\ {|a,b,c,d|}))
+
+rpri(P) = prioritise(P,<{|right|},diff(Events,{|right|})>)
+
+FOSystem = pri((rpri(SND[|{|a,d|}|]((E|||F)[|{|b,c|}|]RCVA)))\{|left,a,b,c,d|})
+
+COPY = left?x -> mid!x -> COPY
+
+CSystem = (pri((COPY [|{|mid|}|](System [[ left <- mid]]))\{|mid|}))
+
+FSystem(k) = (pri((System[|{|right|}|]Count(0,k))\{|left,right|}))
+
+Count(n,k) = n<k & right?x -> Count(n+1,k)
+           [] n==k & ok -> Count(n,k)
+
+channel ok
+
+
+
+
+
+
+ER(N) = [] x:Errors @ x -> WAIT(N);ER(N)
+
+MER(N,0) = STOP
+MER(N,1) = ER(N)
+MER(N,m) = sbisim(MER(N,m-1)|||ER(N))
+
+RegSys(N,M) = System [|Errors|] MER(N,M)
+RegCSys(N,M) = CSystem [|Errors|] MER(N,M)
+RegFSys(N,M,k) = FSystem(k) [|Errors|] MER(N,M)
+RegFOSys(N,M) = FOSystem [|Errors|] MER(N,M)
+
+}
+TCHAOS(X) = ([] x:X @ x -> TCHAOS(X))[> tock -> TCHAOS(X)
+
+
+LaRs(N,M) = (RegSys(N,M) [|union(Errors,{tock})|]normal(TCHAOS(Errors)))\Errors
+LaCs(N,M) = (RegCSys(N,M) [|union(Errors,{tock})|]normal(TCHAOS(Errors)))\Errors
+LaFs(N,M,k) = (RegFSys(N,M,k) [|union(Errors,{tock})|]normal(TCHAOS(Errors)))\Errors
+LaFOs(N,M) = (RegFOSys(N,M) [|union(Errors,{tock})|]normal(TCHAOS(Errors)))\Errors
+
+
+assert STOP [T= SND\diff(Events,{|a|})
+
+assert TBUFF(100) [F= LaCs(4,1)
+assert TBUFF(60) [F= LaCs(3,1)
+assert TBUFF(38) [F= LaCs(3,1)
+assert TBUFF(36) [F= LaCs(3,1)
+assert TBUFF(39) [F= LaCs(3,1)
+assert TBUFF(37) [F= LaCs(3,1)
+assert TBUFF(34) [F= LaCs(3,1)
+assert TBUFF(32) [F= LaCs(3,1)
+assert TBUFF(30) [F= LaCs(3,1)
+assert TBUFF(60) [F= LaCs(3,1)
+assert TBUFF(100) [F= LaCs(2,1)
+assert TBUFF(100) [F= LaCs(3,2)
+assert TBUFF(100) [F= LaCs(5,2)
+
+CT(0) = ok -> CT(0)
+          []tock -> CT(0)
+
+CT(n) = (STOP |~| ok -> CT(n))
+          []tock -> CT(n-1)
+
+assert CT(100) [F=  LaFs(15,2,12)
+assert CT(100) [F=  LaFs(15,2,13)
+
+assert  LaFOs(2,1)\diff(Events,{|right|}) :[livelock-free]
+assert  LaFOs(7,3)\diff(Events,{|right|}) :[livelock-free]
+
+
+
+transparent wbisim, sbisim,normal
+
+external prioritise
+pri(P) = prioritise(P,<{},{tock}>)

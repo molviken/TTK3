@@ -1,0 +1,63 @@
+-- section7-2.csp 
+-- Illustrating interrupt and throw
+-- Bill Roscoe, July 2010
+
+channel a,b,c,lightning
+
+resettable(P) = P /\ lightning -> resettable(P)
+
+Q = a -> b -> c -> Q
+
+assert resettable(Q) [FD= resettable(resettable(Q))
+assert resettable(resettable(Q)) [FD= resettable(Q)
+
+RQ = lightning -> RQ
+     [] a -> (lightning -> RQ
+              [] b -> (lightning -> RQ
+                       [] c -> RQ))
+
+assert resettable(Q) [FD= RQ
+
+assert resettable(Q) :[deterministic]
+assert Q /\ (b -> STOP) :[deterministic]
+
+
+--&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+-- Throw is the only operator that can permit a process to take
+-- an action that would lead to divergence, but itself avoid that
+
+R = a -> R [] b -> DIV
+
+DIV = DIV |~| DIV
+
+RT = R [|{b}|> RT
+
+assert RT :[divergence free]
+
+-- It can catch errors in complex systems and parallel composition
+-- in a concise way, as in
+
+
+-- (R|||R|||....|||R)[|{b}|>Q
+
+-- The following operator catches a run-time error and allows you
+-- to re-start the system in question.
+
+channel revive
+
+revivable(E,P) = P [|E|> (revive -> revivable(E,P))
+
+channel num,den,res:{0..10}
+channel error
+
+Divide = num?x -> den?y -> if y>0 then res!(x/y) -> Divide
+                                  else error -> STOP
+
+assert revivable({error},Divide) :[deadlock free]
+
+-- note that resettable handles errors that come from outside the object process,
+-- and revivable handles ones from within it.
+
+-- There are major uses of [|A|> in example files from chapters 9 and 14
+

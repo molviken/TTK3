@@ -1,0 +1,77 @@
+-- conflict.csp
+
+-- using revivals to specify deadlock-related conflict relations
+
+channel req -- used for the specifications
+
+channel a,b,c,d -- used for experiments
+
+Sigma = {a,b,c,d}
+
+-- two processes that reach strong conflict
+
+PSC = a -> b -> c -> PSC
+APSC = {a,b,c}
+
+QSC = c -> b -> QSC [] d -> QSC
+AQSC = {b,c,d}
+
+-- two in conflict
+
+PC = a -> b -> c -> (a -> BCS [] b -> c -> PC)
+QC = d -> b -> c -> (d -> BCS [] c -> b -> QC)
+
+BCS = b -> BCS [] c -> BCS
+
+-- The following puts P and Q in parallel, allowing them
+-- to synchronise on req whenever they are both asking the
+-- other for communication.
+
+ConflictRHS(P,I,Q) = let Reg = req -> STOP
+                               [] ([]x:Sigma @ x -> Reg)
+                     within
+                    (P[[x <- x, x <- req| x <- I]]
+                      [|union(I,{req})|]
+                     Q[[x <- x, x <- req| x <- I]])
+                      [|Events|]
+                     Reg
+
+-- The following specification says that whenever req happens, some
+-- member of I can happen as well.
+
+ConflictLHS(I) = |~| x:I @ (x -> ConflictLHS(I) [] req -> STOP)
+                 |~| STOP
+                 |~| (|~| x:Sigma @ x -> ConflictLHS(I))
+
+-- So the following check establishes that the processes cannot
+-- both be willing to talk to the other in a stable state without
+-- agreeing on some member of I.
+
+assert ConflictLHS({b,c}) [V= ConflictRHS(PSC,{b,c},QSC)
+assert ConflictLHS({b,c}) [V= ConflictRHS(PC,{b,c},QC)
+
+-- In Strong Conflict we do allow req and all of I to be refused,
+-- but if so insist that at least one external event of each process
+-- can occur.  It only makes sense to talk about this for alphabetised
+-- parallel so we can separate P's and Q's external events.
+
+SConflictLHS(AP,AQ) = let I = inter(AP,AQ) 
+                          XP = diff(AP,I)
+                          XQ = diff(AQ,I)
+                      within
+                  |~| x:I @ (x -> SConflictLHS(AP,AQ) [] req -> STOP)
+                  |~| STOP
+                  |~| (|~| x:Sigma @ x -> SConflictLHS(AP,AQ))
+                  |~| (|~| x:XP, y:XQ @ 
+                       ([] z:{x,y,req} @ z -> SConflictLHS(AP,AQ)))
+
+-- The above additionally allows req when accompanied by an external
+-- event from each of the two processes.
+
+-- So we can use the same RHS
+                         
+assert SConflictLHS(APSC,AQSC) [V= ConflictRHS(PSC,{b,c},QSC)
+assert SConflictLHS(APSC,AQSC) [V= ConflictRHS(PC,{b,c},QC)
+
+-- None of these specifications works over failures models
+

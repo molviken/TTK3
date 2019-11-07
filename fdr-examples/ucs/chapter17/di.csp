@@ -1,0 +1,100 @@
+-- di.csp
+
+-- Simple illustrative examples of threshold-based data independence
+
+-- See Section 17.2 of UCS and Chapter 15 of TPC
+
+-- Part 1: Threshold of 1
+
+-- This applies to cases where there are no equality tests on the data type 
+-- or only positive consequences of equality in the case of traces,
+-- and where the specification never places any restriction on which
+-- member of T is communicated.
+
+-- So we can test such a data independent system, for example
+
+T = {0}
+channel left,right:T
+
+COPY = left?x -> right!x -> COPY
+
+NCOPY(1) = COPY
+NCOPY(n) = COPY [left <-> right] NCOPY(n-1)
+
+-- for livelock or deadlock using T={0}
+
+assert NCOPY(10) :[livelock-free]
+assert NCOPY(10) :[deadlock-free]
+
+-- Consider the processes
+
+Equate = in1?x -> in2?y -> if x==y then out!x -> Equate else STOP
+UnEquate = in1?x -> in2?y -> if x!=y then out!x -> UnEquate else STOP
+
+-- Note that the first of these satisfies PosConjEqT and
+-- the second does not.
+
+channel in1,in2,in3,out,out1:T
+
+Spec1 = in1?x -> in2?y -> out?z -> Spec1
+Spec2 = in1?x -> in2?x -> STOP
+Spec3 = in1$x -> in2$y -> out$z -> Spec3  -- identical to Spec1 as a trace check
+
+-- Make sure that you understand why
+
+-- 1. The check
+
+assert Spec1 [T= Equate
+
+-- for T={0} establishes this property for all T: this is because, over arbitrary T,
+-- if our process has any trace then it has the same trace with all data replaced
+-- by 0s.
+
+-- 2. The check
+
+assert Spec1 [T= UnEquate
+
+-- for T={0} does not establish it for all T, even though it is true for this type:
+-- note that
+
+assert Spec2 [T= UnEquate
+
+-- is true for T={0} but not for T = {0,1}
+
+-- 3. On the other hand
+
+assert Spec3 [F= Equate
+
+-- for T={0} does not establish this property for all T
+-- It is true for {0} but not for {0,1}.
+-- Note that inequality over the failures model brings an
+-- extra observable behaviour, namely deadlock, that
+-- is not there under equality.
+
+
+-- Part 2: Threshold of 2
+
+-- T = {0,1}
+
+-- This applies to specifications that may specify which
+-- member of T comes out of an implementation, but where
+-- specification and implemenentation satisfy the same
+-- no or limited equality testing as above, with the
+-- specification satisfying the well-formedness condition Norm.
+
+-- The specification of an N-or-less place buffer
+
+NBuff(N,s) = if s==<> then left?x -> NBuff(N,<x>)
+             else right!head(s) -> NBuff(N,tail(s))
+                  [] (if #s==N then STOP else
+                      (STOP |~| left?x -> NBuff(N,s^<x>)))
+
+-- So we may check
+
+assert NBuff(4,<>) [FD= NCOPY(4)
+
+-- for T = {0,1} to establish it for all T.
+
+
+
+

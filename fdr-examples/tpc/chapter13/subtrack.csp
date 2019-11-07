@@ -1,0 +1,91 @@
+-- subtrack.csp
+
+-- Bill Roscoe
+
+-- This illustrates the example in Section 13.5 (illustrated in Figures
+-- 13.9 and 13.10) of a system which is deadlock free though it has
+-- subnetworks that can deadlock.
+
+-- Like most of the files in this directory, we will use the compression
+-- strategies of the following file
+
+include "compression.csp"
+transparent normal
+
+-- We will implement the system in Figure 13.10 as a simple network of
+-- processes that are either full or empty, and represent the passage
+-- of trains by communication on a common channel between adjacent
+-- sections.
+
+-- Most of the track sections have no points in them and so take one of
+-- the forms:
+
+Empty(in,out) = in -> Full(in,out)
+
+Full(in,out) = out -> Empty(in,out)
+
+-- For sections with points we should distinguish between points with
+-- a single in line and two outs
+
+Pointsout(in,out1,out2,switch) = in -> out1 -> Pointsout(in,out1,out2,switch)
+                              [] switch-> Pointsout(in,out2,out1,switch)
+
+-- and one with two ins and one out
+
+Pointsin(in1,in2,out,switch) = in1 -> out -> Pointsin(in1,in2,out,switch)
+                            [] switch -> Pointsin(in2,in1,out,switch)
+
+-- In the picture there are 14 nodes round the outside
+
+channel ring:{0..13}
+
+-- and 4 sections of track on the inner section between the two points.
+
+channel bypass:{1..4}
+
+-- There are points in sections 4 and 9 of the ring
+-- (numbering from 0 at the top left)
+
+channel point4, point9
+
+-- The initial state is given by the following process/alphabet pairs:
+
+Ring(4) = (Pointsin(ring.4,bypass.4,ring.5,point4),
+           {ring.4,bypass.4,ring.5,point4})
+
+Ring(9) = (Pointsout(ring.9,ring.10,bypass.1,point9),
+           {ring.9,bypass.1,ring.10,point9})
+
+Ring(1) = (Full(ring.1,ring.2),{ring.1,ring.2})
+
+Ring(i) = (Empty(ring.i,ring.(i+1)%14),{ring.i,ring.(i+1)%14})
+
+ByPass(2) = (Full(bypass.2,bypass.3),{bypass.2,bypass.3})
+
+ByPass(i) = (Empty(bypass.i,bypass.i+1),{bypass.i,bypass.i+1})
+
+-- Figures 13.9 and 13.10 are represented respectively by:
+
+TrackList = <Ring(i) | i <- <0..13>>^<ByPass(i) | i <- <1..3>>
+
+OpenTrackList = <Ring(i) | i <- <0..12>>^<ByPass(i) | i <- <1..3>>
+
+-- The following checks show the respective deadlock freedom and
+-- deadlock of these two networks.  The first two are
+-- uncompressed, and the last two compressed: the major difference
+-- is made in the deadlocking version, which has many more states
+-- because of the possibility of there being an arbitrary number of
+-- full track sections:
+
+assert ListPar(TrackList) :[deadlock free [F]]
+assert ListPar(OpenTrackList) :[deadlock free [F]]
+
+-- It makes no sense to try leaf compression on these systems, because
+-- there are very few actions that are not synchronised between two
+-- processes.  Therefore we try inductive compression, which actually
+-- works rather better on the OpenTrackList network because the
+-- open end of the track gives an extra pair of unsynchronised events. 
+
+assert InductiveCompress(normal)(TrackList)(Events) :[deadlock free [F]]
+assert InductiveCompress(normal)(OpenTrackList)(Events) :[deadlock free [F]]
+

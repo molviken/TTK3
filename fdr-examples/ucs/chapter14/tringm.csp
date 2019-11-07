@@ -1,0 +1,91 @@
+-- tringm.csp
+
+--Timed version of token ring from chapter 4,
+-- This version has the "metering" described at the end of Chapter 14
+
+T={0}
+
+N=4
+tokens = 2
+
+Nodes = {0..N-1}
+
+datatype Token = Empty | Full.Packet
+
+Packet = {(a,b,m) | a <- Nodes, b <- Nodes, m <- T}
+
+channel ring:Nodes.Token
+
+channel tock
+
+-- for the metering: a limit time and named tocks
+
+maxT = 100
+channel ctock: {1..maxT}
+
+channel nontock, flag
+
+channel send,receive:Nodes.Nodes.T
+
+
+NodeE(n) = ring.n.Empty -> tock ->  NodeR(n)
+           [] ring.n?Full.(a,b,m) -> tock -> NodeF(n,a,b,m)
+           [] tock -> NodeE(n)
+
+NodeR(n) = send.n?b:diff(Nodes,{n})?m -> tock -> NodeF(n,n,b,m)
+           [] tock -> NodeR'(n)
+
+NodeR'(n) = send.n?b:diff(Nodes,{n})?m -> tock -> NodeF(n,n,b,m)
+           [] ring.(n+1)%N.Empty -> tock -> NodeE(n)
+           [] tock -> NodeR'(n)
+
+NodeF(n,a,b,m) = if b==n then receive.n.a.m -> tock -> NodeR(n)
+                 else (ring.(n+1)%N.Full.(a,b,m) -> tock -> NodeE(n)
+                       [] tock -> NodeF(n,a,b,m))
+
+A(n) = {|ring.n,ring.(n+1)%N,send.n,receive.n, tock|}
+
+Init(n) = if n<tokens then NodeR(n) else NodeE(n)
+
+
+Ring = (|| i:Nodes @[A(i)] Init(i))\{|ring|}
+
+TOCKS = tock -> TOCKS
+
+assert TOCKS [FD= (CHAOS({|send|})[|{|send|}|] Ring)\diff(Events,{tock})
+
+Sender(n) = send.n?b!0 -> STOP
+Sender2(n) = send.n?b!0 -> send.n?b -> STOP
+
+SRing = (Ring [|{|send|}|] (||| n:Nodes @ Sender(n)))\{|send|}
+SRing2 = (Ring [|{|send|}|] (||| n:Nodes @ Sender2(n)))\{|send|}
+
+By(0) = tock -> By(0)
+By(k) = receive?x ->  By(k)
+        [] tock -> By(k-1)
+
+-- This construction renames each tock up to the limit to
+-- a separate number
+
+clock(P) = P[[tock <- ctock.n | n <- {1..maxT}]] [|{|ctock|}|] TC(1)
+
+TC(n) = if n > maxT then STOP else ctock.n -> TC(n+1)
+
+-- This construct allows any non-tock event to trip the thow
+-- operator which gives a unique state that can perform the flag event
+
+Flag(P) = let rnP = P[[x <- x, x <-nontock | 
+                       x <- diff(Events,{|tock,ctock,flag,nontock|})]]
+          within
+              rnP [|{nontock}|> flag -> STOP
+
+-- running the following check with examples=100 will find one
+-- for each length of time a non-tock event can (still) occur and
+-- therefore allow the rapid calculation of the maximum such time.
+
+assert RUN(diff(Events,{flag})) [T= clock(Flag(SRing)) :[tau priority]:{|ctock|}
+assert RUN(diff(Events,{flag})) [T= clock(Flag(SRing2)) :[tau priority]:{|ctock|}
+
+RUN(X) = [] x:X @ x -> RUN(X)
+
+

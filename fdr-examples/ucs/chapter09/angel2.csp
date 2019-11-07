@@ -1,0 +1,80 @@
+
+-- angel.csp
+-- Angelic choice as an example of a CSP-like operator
+
+-- Adapted from the version angel.csp by avoiding the use of the
+-- throw operator in managing termination.
+
+-- Note that while it is possible to construct angelic choice without
+-- throw, this is not true of all operators.
+
+channel a,b,c  -- basic events for processes to use
+
+Sigma = {a,b,c}
+
+channel tau
+channel tick1, tick2, tick1', tick2' -- events to regulate termination
+
+ticks = {tick1,tick2, tick1', tick2'}
+
+Lane = {1,2}  -- used to structure events
+datatype Status = V | H  -- visible or hidden events
+
+channel ev:Sigma.Lane.Status
+
+-- The expanding and contracting renamings
+
+
+ER(i,P) = P[[x <- ev.x.i.V, x <- ev.x.i.H | x <- Sigma]]
+
+CR(P) = P[[ev.x.i.V <- x, ev.x.i.H <- tau | x <- Sigma, i<-Lane]]
+         [[t <- tau | t <- ticks]]
+
+
+
+-- In this file we concentrate on the bounded version which works up
+-- to a given length of trace
+
+Bd = 5
+
+BReg = ev?x!1!V -> BReg1(<x>)
+     [] ev?x!2!V -> BReg2(<x>)
+     [] tick1 -> tick2' -> STOP
+     [] tick2 -> tick1' -> STOP
+
+BReg1(<y>^s) = #s < Bd-1 & ev?x!1!V -> BReg1(<y>^s^<x>)
+             [] ev!y!2!H -> (if s==<> then BReg else BReg1(s))
+             [] tick1 -> tick2' -> SKIP
+             [] tick2 -> BReg1'
+
+BReg1' = ev?x!1!V -> BReg1'
+        [] tick1 -> SKIP
+
+
+BReg2(<y>^s) = (#s < Bd-1 & ev?x!2!V -> BReg2(<y>^s^<x>))
+             [] ev!y!1!H -> (if s==<> then BReg else BReg2(s))
+             [] tick2 -> tick1' -> SKIP
+             [] tick1 -> BReg2'
+
+BReg2' = ev?x!2!V -> BReg2'
+        [] tick1 -> SKIP
+
+
+bangelic(P,Q) = CR((ER(1,((P;tick1 -> SKIP)/\(tick1' -> SKIP)))|||
+                     ER(2,((Q;tick2 -> SKIP)/\(tick2' -> SKIP))))
+                  [|{|ev,tick1,tick2,tick1',tick2'|}|]
+                  BReg)\{tau}
+
+
+A = a -> a -> b -> SKIP
+B = a -> a -> a -> STOP 
+C = a -> a -> a -> c -> STOP 
+
+assert bangelic(bangelic(A,B),C) :[deterministic]
+
+ABC = a -> a -> (a -> c -> STOP [] b -> SKIP)
+
+assert ABC [FD=  bangelic(bangelic(A,B),C) 
+
+-- The versions of bangelic defined in the two files are equivalent.
+

@@ -1,0 +1,105 @@
+-- virtroute.csp
+
+-- Bill Roscoe
+
+-- This file illustrates Yantchev's virtual routing or
+-- "mad postman" network.  
+
+-- File from TPC  minimally adapted for UCS.
+
+
+
+-- It is configured mainly as an exercise in determining the effectiveness
+-- of compression functions: see chapter 8.
+
+include "compression09.csp"
+transparent normal
+
+H = 20
+W = 20
+
+-- We give here the "data-free" nondeterministic version of the network
+-- discussed in section 13.6.1 or TPC and section 4.2.3 of UCS.  
+
+channel u,d,l,r,over,in,out:{0..W+1}.{0..H+1}
+
+-- Each physical node has two parallel processes, I and O.  When each
+-- inputs a value it selects (here nondeterministically) where to send it.
+
+I(i,j) = in.i.j -> I'(i,j)
+       [] d.i.j -> I'(i,j)
+       [] r.i.j -> I'(i,j)
+
+-- I selects between sending right,down and over to O
+
+I'(i,j) = let
+            S = Union({{over.i.j},
+		       {d.i.j+1},
+		       {r.i+1.j}})
+          within
+	   |~| x:S @ x -> I(i,j)
+
+AI(i,j) = {in.i.j,over.i.j,
+           d.i.j, r.i.j,
+	   d.i.j+1, r.i+1.j}
+
+O(i,j) = over.i.j -> O'(i,j)
+       [] u.i.j -> O'(i,j)
+       [] l.i.j -> O'(i,j)
+
+-- O selects between sending left,up and out to its user
+
+O'(i,j) = let
+            S = Union({{out.i.j},
+		       {u.i.j-1},
+		       {l.i-1.j}})
+          within
+	   |~| x:S @ x -> O(i,j)
+
+AO(i,j) = {out.i.j, over.i.j,
+           u.i.j, l.i.j,
+	   u.i.j-1, l.i-1.j}
+
+-- So the complete node is
+
+N(i,j) = (I(i,j)[AI(i,j)||AO(i,j)]O(i,j))\{over.i.j}
+
+AN(i,j) = diff(union(AI(i,j),AO(i,j)),{over.i.j})
+
+NetList(W',H') = <(N(i,j),AN(i,j)) | i <- <1..W'>, j<-<1..H'>>
+
+-- We give here three different compression strategies: note the
+-- incremental network sizes given to them
+
+-- None
+
+assert ListPar(NetList(2,2)):[deadlock free [F]]
+assert ListPar(NetList(2,3)):[deadlock free [F]]
+
+-- Simply compressing the individual node processes without using 
+-- the abstraction of external communications.  You will find this
+-- gives a lot less states but runs very slowly per state.  This
+-- is because there are lots of refusal sets to calculuate for
+-- each state
+
+assert LeafCompress(normal)(NetList(2,2))({}) :[deadlock free [F]]
+assert LeafCompress(normal)(NetList(2,3))({}) :[deadlock free [F]]
+
+
+-- and using the abstraction:
+
+assert LeafCompress(normal)(NetList(2,3))(Events) :[deadlock free [F]]
+assert LeafCompress(normal)(NetList(4,4))(Events) :[deadlock free [F]]
+assert LeafCompress(normal)(NetList(6,6))(Events) :[deadlock free [F]]
+assert LeafCompress(normal)(NetList(10,10))(Events) :[deadlock free [F]]
+
+-- You will notice that this always gets the network down to one
+-- state, but that it still takes impossibly long for the 10x10
+-- network.  This is again because of multiplication of refusal sets.
+-- This can be eliminated by building up the network
+-- a row at a time.
+
+RowList(W',H') = <<(N(i,j),AN(i,j)) | i <- <1..W'>> | j<-<1..H'>>
+
+assert StructuredCompress(normal)(RowList(10,10))(Events) :[deadlock free [F]]
+

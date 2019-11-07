@@ -1,0 +1,94 @@
+
+
+
+
+-- general4.csp
+-- building a general deadlock free network out of a tree.
+-- For Section 4.2.1 of Understanding concurrent systems
+
+-- This version illustrates the divergence possibility discussed below.
+
+T = {0} -- type of things passed along channels
+          -- for the purpose of deadlock, T={0} is sufficient.
+
+-- Building the central tree
+
+N = 6 -- number of nodes
+
+Node = {0..N-1}
+
+TEdges = {{0,1}, {1,2}, {2,3}, {3,4},{4,5}}
+XEdges = {{0,3}, {2,5},{2,3}}
+
+tnbrs(r) = {j | j <- Node, member({j,r},TEdges)}
+xnbrs(r) = {j | j <- Node, member({j,r},XEdges)}
+nbrs(r) = union(tnbrs(r),xnbrs(r))
+
+TComponent(i,j) = let delta(X) = {k | k <- diff(Node,union({j},X)),
+                                     card(inter(TEdges,{{k,l}| l <- X}))>0}
+                     close(X) = if card(delta(X))==0 then X
+                                else close(union(X,delta(X)))
+                     within close({i})
+
+tnext(i,n) = let {j} = {k | k <- tnbrs(i), member(n,TComponent(k,i))}
+            within j  
+
+-- Here is a very simple definition of next:
+
+next(0,5) = 3
+next(3,5) = 2
+next(i,n) = if member({i,n},XEdges) then n else tnext(i,n)
+            
+------------------------------------
+                    
+
+
+channel send, receive:Node.Node.T
+
+nametype packet = (Node,Node,T)
+
+channel pass,swap:Node.Node.packet
+channel yes,no:Node.Node
+
+NodeE4(i) = send.i?m?x -> NodeF4(i,(i,m,x))
+       [] pass?j:tnbrs(i)!i?p -> NodeF4(i,p)
+       [] yes?j:xnbrs(i)!i -> pass.j.i?p -> NodeF4(i,p)
+
+NodeF4(i,(s,r,m)) = if i==r then NodeF4L(i,s,m)
+                    else if next(i,r)==tnext(i,r) then NodeF4T(i,s,r,m)
+                                                  else NodeF4O(i,s,r,m)
+
+NodeF4L(i,s,m) = receive.i.s.m -> NodeE4(i)
+                  [] no?j:xnbrs(i)!i -> NodeF4L(i,s,m)
+
+NodeF4T(i,s,r,m) = (pass.i.tnext(i,r).(s,r,m) -> NodeE4(i)
+                      [] swap.i.tnext(i,r).(s,r,m) ->  
+                         swap.tnext(i,r).i?(s',r',m') ->  NodeF4(i,(s',r',m'))
+                      [] swap.tnext(i,r).i?(s',r',m') ->  
+                         swap.i.tnext(i,r).(s,r,m) ->  NodeF4(i,(s',r',m')))
+                 [] no?j:xnbrs(i)!i -> NodeF4T(i,s,r,m)
+
+NodeF4O(i,s,r,m) =  yes.i.next(i,r) -> pass.i.next(i,r).(s,r,m) -> NodeE4(i)
+                    [] no.i.next(i,r) -> NodeF4T(i,s,r,m)
+                 [] no?j:xnbrs(i)!i -> NodeF4O(i,s,r,m)
+
+A(i) = Union({{|pass.i.j, pass.j.i | j <- nbrs(i)|},
+              {| swap.i.j, swap.j.i | j <- tnbrs(i) |},
+              {|yes.i.j, yes.j.i, no.i.j, no.j.i | j <- xnbrs(i) |},
+              {| send.i, receive.i|}})
+
+Network = || i:Node @ [A(i)] NodeE4(i)
+
+assert Network :[deadlock free]
+
+-- For Chapters 5 and 6
+
+HNetwork = Network\{|pass,swap,yes,no|}
+
+assert HNetwork :[divergence free]
+
+-- For some networks this will fail because messages can go around in
+-- circles as described in the text.  This results in a divergent
+-- loop of internal messages.  The definition of next above ensures
+-- this never happens, but more ambitious ones can fail.
+

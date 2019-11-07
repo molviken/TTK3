@@ -1,0 +1,68 @@
+-- tnonblock.csp
+
+--Timed version of non-blocking ring from chapter 4.
+
+-- Arranged to show how long it takes to transmit a block of messages
+-- for comparison with token ring.
+
+T={0}
+
+N=4 -- checks below for 4 and 5
+
+Nodes = {0..N-1}
+
+Packet = {(a,b,m) | a <- Nodes, b <- Nodes, m <- T}
+
+channel ring:Nodes.Packet
+
+channel tock
+
+channel send,receive:Nodes.Nodes.T
+
+
+NodeE(n) =  ring.n?(a,b,m) -> tock -> Node1(n,a,b,m)
+           [] send.n?b?m -> tock ->  Node1(n,n,b,m) 
+           [] tock -> NodeE(n)
+
+Node1(n,a,b,m) =  if n==b then receive.n.a.m -> tock ->  NodeE(n)
+                  else 
+               (tock -> Node1(n,a,b,m)
+               [] ring.n?(a',b',m') -> tock -> Node2(n,a,b,m,a',b',m')
+               [] ring.(n+1)%N.(a,b,m) ->  tock-> NodeE(n))
+
+Node2(n,a,b,m,a',b',m') = tock -> Node2(n,a,b,m,a',b',m')
+                       [] ring.(n+1)%N.(a,b,m) -> tock -> Node1(n,a',b',m')
+
+
+A(n) = {|ring.n,ring.(n+1)%N,send.n,receive.n, tock|}
+
+
+
+Ring = (|| i:Nodes @[A(i)] NodeE(i))\{|ring|}
+
+TOCKS = tock -> TOCKS
+
+assert TOCKS [FD= (CHAOS({|send|})[|{|send|}|] Ring)\diff(Events,{tock})
+
+Sender(n) = send.n?b!0 -> STOP
+Sender2(n) = send.n.(n+N-1)%N!0 -> send.n?b -> STOP
+
+SRing = (Ring [|{|send|}|] (||| n:Nodes @ Sender(n)))\{|send|}
+SRing2 = (Ring [|{|send|}|] (||| n:Nodes @ Sender2(n)))\{|send|}
+
+By(0) = tock -> By(0)
+By(k) = receive?x ->  By(k)
+        [] tock -> By(k-1)
+
+transparent chase
+
+-- showing the time for different values of N
+
+assert By(8) [T= SRing :[tau priority over]:{tock}
+assert By(9) [T= SRing :[tau priority over]:{tock}  -- N=4
+
+assert By(12) [T= SRing :[tau priority over]:{tock}
+assert By(13) [T= SRing :[tau priority over]:{tock}  -- N=5
+        
+assert By(27) [T= SRing2 :[tau priority over]:{tock}  
+assert By(28) [T= SRing2 :[tau priority over]:{tock} --N=4

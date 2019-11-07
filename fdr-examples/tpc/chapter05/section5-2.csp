@@ -1,0 +1,67 @@
+-- section5-2.csp 
+
+-- buffer tolerance
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of some of the main CSP processes in Section 5.2 of those into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE.  
+
+-- To show the behaviour in this section we need:
+
+channel left, right:T
+
+T = {0,1,2}
+
+-- However the external type of buffers operates over the subtype
+
+T' = {0,1}
+
+-- and so it is appropriate to have a buffer specification with a type
+-- parameter:
+
+BBUFF(X,N,<>) = left?x:X -> BBUFF(X,N,<x>)
+
+BBUFF(X,N,s^<a>) = #s < N-1 & (left?x:X -> BBUFF(X,N,<x>^s^<a>) |~| STOP)
+               [] right!a -> BBUFF(X,N,s)
+
+
+WBUFF(X,N,<>) = left?x:X -> WBUFF(X,N,<x>)
+
+WBUFF(X,N,s^<a>) = (left?x:X -> (if #s==N-1 then BOTTOM 
+                                            else WBUFF(X,N,<x>^s^<a>))
+                  |~| STOP)
+                  [] right!a -> WBUFF(X,N,s)
+
+BOTTOM = BOTTOM |~| CHAOS(Events)
+
+-- Similarly we have a parameterized COPY:
+
+COPY(X) = left?x:X -> right!x -> COPY(X)
+
+-- so that the counter-example in the section now becomes:
+
+P = COPY(T') [] right!2 -> STOP
+
+Q = COPY(T)
+
+R = COPY(T')
+
+-- with the process
+
+PQR = P [right <-> left] (Q [right <-> left] R)
+
+-- demonstrating the failing of the prototype BL6 via, for example
+
+assert PQR :[deadlock free]
+
+assert WBUFF(T',1,<>) [FD= PQR
+
+-- The example of putting MajSys inside the parity checker in the file
+-- section5-1.csp is one example illustrating BL6.  Obviously one
+-- could construct any number of other examples of this.
+
+-- I suggest you try out some of your solutions to the exercises in this
+-- section on FDR/ProBE.

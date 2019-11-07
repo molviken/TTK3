@@ -1,0 +1,328 @@
+
+-- crossing.csp
+
+-- Model of a level crossing gate for FDR: revised version
+-- Illustrating discrete-time modelling using untimed CSP
+
+-- Bill Roscoe, November 1992 with various revisions
+
+-- This is the system described in Section 14.3
+
+channel tock
+
+transparent normal
+
+-- The following are the communications between the controller process and
+-- the gate process
+
+datatype gatestates = godown | goup | up | down
+
+-- where we can think of the first two as being commands to it, and the
+-- last two as being confirmations from a sensor that they are up or down.
+
+channel gate:gatestates
+
+-- For reasons discussed below, we introduce a special error event:
+
+channel error
+
+-- To model the speed of trains, and also the separation of more than one
+-- trains, we divide the track into segments that the trains can enter or
+-- leave.
+
+datatype TRAINS = Thomas | Duncan
+
+N=5
+
+TRACKS = {0..N}
+
+-- Here, segment 0 represents theo outside world, and 1-4 actual track segments
+-- including the crossing, which is at
+
+GateSeg=N-1
+
+-- To make modular arithmetic convenient, we define
+
+
+channel enter,leave:TRAINS.TRACKS
+
+-- Trains are detected when they enter the first track segment by a sensor,
+-- which drives the controller, and are also detected by a second sensor
+-- when they leave.
+
+datatype sensorsig = in | out
+
+channel sensor:sensorsig
+
+--(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)(+)
+
+-- Untimed trains and tracks
+
+-- The following gives an untimed description of Train A on track segment j
+-- A train not currently in the domain of interest is given index 0.
+
+Train(A,j) =  enter.A.((j+1)%(N+1)) -> leave.A.j -> Train(A,(j+1)%(N+1))
+
+Trains = Train(Thomas,0) ||| Train(Duncan,0)
+
+-- The real track segments can be occupied by one train at a time, and each
+-- time a train enters segment 1 or leaves GateSeg the sensors fire.
+
+Track(j) = if j==1  then enter?A!j -> sensor.in -> Trackf(A,j) 
+                    else enter?A!j -> Trackf(A,j)
+
+Trackf(A,j) = leave.A.j -> if j==GateSeg then sensor.out -> Track(j)
+                                         else Track(j)
+
+-- Like the trains, the untimed track segments do not communicate with 
+-- each other
+
+Tracks = ||| i:{1..N} @ Track(i)
+
+-- And we can put together the untimed network, noting that since there is
+-- no process modelling the outside world there is no need to synchronise
+-- on the enter and leave events for this area.
+
+Network = Trains [|diff({|enter,leave|},{enter.A.0,leave.A.0 | A <- TRAINS})|] 
+          Tracks
+
+--##=##=##=##=##=##=##=##=##=##=##=##=##=##=##=##=##=##=##=##=##=##=##=##=##=
+
+-- Speed assumptions on trains
+
+-- We make assumptions about the speed of trains by placing (uniform)
+-- upper and lower "speed limits" on the track segments:
+
+MinTocksPerSeg = 3
+MaxTocksPerSeg = 6
+
+-- The speed regulators express bounds on the times between successive
+-- enter events.
+
+SpeedReg(j) = enter?A!j -> SpeedReg'(j,0)
+              [] tock -> SpeedReg(j)
+
+SpeedReg'(j,n) = n < MaxTocksPerSeg & tock -> SpeedReg'(j,n+1) 
+               [] n >= MinTocksPerSeg & enter?A!(j+1)%(N+1) -> SpeedReg(j)
+
+AlphaSR(j) = {tock,enter.A.j,enter.A.(j+1)%(N+1) | A <- TRAINS}
+
+SpeedRegs = || j:{1..N} @ [AlphaSR(j)] SpeedReg(j)
+
+-- The following pair of processes express the timing contraint that
+-- the two sensor events occur within one time unit of a train entering
+-- or leaving the domain.
+
+InSensorTiming = tock -> InSensorTiming
+               [] enter?A!1 -> sensor.in -> InSensorTiming
+
+OutSensorTiming = tock -> OutSensorTiming
+               [] leave?A!GateSeg -> sensor.out -> OutSensorTiming
+
+-- The timing constraints of the trains and sensors are combined into the
+-- network as follows, noting that no speed limits are used outside the domain:
+
+SensorTiming = InSensorTiming [|{|tock|}|] OutSensorTiming
+
+NetworkTiming = SpeedRegs [|{tock,enter.A.1 | A <- TRAINS}|]
+                SensorTiming
+
+TimedNetwork = (Network [|union({|enter,sensor|},
+                       {leave.A.GateSeg | A <- TRAINS})|] NetworkTiming)
+
+
+--=*==*==*==*==*==*==*==*==*==*==*==*==*==*==*==*==*==*==*==*==*==*==*==*==*=
+
+-- Gate and controller
+
+-- The last components of our system are a controller and the gate.
+-- The duties of the controller
+-- are to ensure that the gate is always down when there is a train on the
+-- gate, and that it is up whenever prudent.
+
+
+-- When the gate is up, the controller does nothing until the sensor
+-- detects an approaching train.  
+-- In this state, time is allowed to pass arbitrarily, except that the
+-- signal for the gate to go down is sent immediately on the occurrence of
+-- the sensor event.
+
+ControllerUp = sensor.in -> gate!godown -> ControllerGoingDown(1)
+               [] sensor.out -> ERROR
+               [] tock -> ControllerUp
+
+-- The two states ControllerGoingDown and ControllerDown 
+-- both keep a record of how many trains
+-- have to pass before the gate may go up.  Each time the sensor event
+-- occurs this count is increased.
+-- The count should not get greater than the number of trains that
+-- can legally be between the sensor and the gate (which equals the
+-- number of track segments).
+-- The ControllerGoingDown state comes to an end when the gate.down event occurs
+
+ControllerGoingDown(n) = (if GateSeg < n then ERROR 
+                         else sensor.in -> ControllerGoingDown(n+1) )
+                         []  gate.down -> ControllerDown(n)
+                         []  tock -> ControllerGoingDown(n)
+                         []  sensor.out -> ERROR
+              
+-- When the gate is down, the occurrence of a train entering its sector
+-- causes no alarm, and each time a train leaves the gate sector the
+-- remaining count goes down, or the gate is signalled to go up, as appropriate.
+-- Time is allowed to pass arbitrarily in this state, except that the
+-- direction to the gate to go up is instantaneous when due.
+
+ControllerDown(n) = (if GateSeg < n then ERROR
+                                   else sensor.in -> ControllerDown(n+1))
+                      [] sensor.out -> 
+                             (if n==1 then gate!goup -> ControllerGoingUp 
+                                      else ControllerDown(n-1))
+                      [] tock -> ControllerDown(n)
+
+-- When the gate is going up, the inward sensor may still fire, which means that
+-- the gate must be signalled to go down again.
+-- Otherwise the gate goes up after UpTime units.
+
+ControllerGoingUp =  gate!up -> ControllerUp
+                     [] tock -> ControllerGoingUp
+                     [] sensor.in -> gate!godown -> ControllerGoingDown(1)
+                     [] sensor.out -> ERROR
+
+
+-- Any process will be allowed to generate an error event, and since we will
+-- be establishing that these do not occur, we can make the successor process
+-- anything we please, in this case STOP.
+
+ERROR = error -> STOP
+
+
+-- The following are the times we assume here for the gate to go up
+-- and go down.  They represent upper bounds in each case.
+
+DownTime = 5
+UpTime = 2
+
+GateUp = gate.goup -> GateUp
+         [] gate.godown -> GateGoingDown(0)
+	 [] tock -> GateUp
+
+GateGoingDown(n) = gate.godown -> GateGoingDown(n)
+                   [] (if n == DownTime then gate.down -> GateDown
+		      else
+		      (gate.down -> GateDown
+		      |~| tock -> GateGoingDown(n+1)))
+
+GateDown = gate.godown -> GateDown
+         [] gate.goup -> GateGoingUp(0)
+	 [] tock -> GateDown
+
+GateGoingUp(n) = gate.goup -> GateGoingUp(n)
+                 [] gate.godown -> GateGoingDown(0)
+                 [] (if n == UpTime then gate.up -> GateUp
+	             else
+		      (gate.up -> GateUp
+		      |~| tock -> GateGoingUp(n+1)))
+
+GateAndController = (ControllerUp [|{|tock,gate|}|] normal(GateUp))
+
+System = TimedNetwork [|{|sensor,tock|}|] GateAndController
+
+--~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-~^-
+
+-- And now for specifications.  Since we have not synchronised on any
+-- error events, they would remain visible if they occurred.  Their
+-- absence can be checked with
+
+NoError = CHAOS(diff(Events,{error}))
+
+assert NoError [T= System
+
+-- This shows that none of the explicitly caught error conditions arises,
+-- but does not show that the system has the required safety property of
+-- having no train on the GateSeg when the gate is other than down.
+
+-- The required specifications are slight generalisations of those
+-- discussed in specs.csp; the following notation and development is
+-- consistent with that discussed there.
+
+SETBETWEENx(EN,DIS,C) = ([]x:EN @ x -> SETOUTSIDEx(DIS,EN,C))
+                        [] ([] x:DIS @ x -> SETBETWEENx(EN,DIS,C))
+
+SETOUTSIDEx(DIS,EN,C) = ([] c:C @ c -> SETOUTSIDEx(DIS,EN,C))
+                        [] ([] x: EN @ x -> SETOUTSIDEx(DIS,EN,C))
+                        [] ([] x:DIS @ x -> SETBETWEENx(EN,DIS,C))
+
+-- The above capture the sort of relationships we need between the
+-- relevant events.  If we want to stay within Failures-Divergence Refinement
+-- (as opposed to using CheckTrace subtly), we need to do the following to
+-- turn them into the conditions we need:
+
+EnterWhenDown = SETBETWEENx({gate.down},{gate.up,gate.goup,gate.godown},
+                            {enter.i.GateSeg | i <- TRAINS})
+                      [|{|gate, enter.i.GateSeg | i <- TRAINS|}|]CHAOS(Events)
+
+GateStillWhenTrain = SETOUTSIDEx({enter.i.GateSeg | i <- TRAINS},
+                                 {leave.i.GateSeg | i <- TRAINS},{|gate|})
+                    [|{|gate,enter.i.GateSeg,leave.i.GateSeg | i <- TRAINS|}|]
+                                     CHAOS(Events)
+
+-- So we can form a single safety spec by conjoining these:
+
+Safety = EnterWhenDown [|Events|] GateStillWhenTrain
+
+assert Safety [T= System
+
+-- An important form of liveness we have thus far ignored is that the clock
+-- is not stopped: for this it is sufficient that TimingConsistency
+-- refines TOCKS, where
+
+TOCKS = tock -> TOCKS
+
+-- The following is the set of events that we cannot rely on the environment
+-- not delaying.
+
+Delayable = {enter.A.1 | A <- TRAINS}
+
+TimingConsistency = ((System[|Delayable|]
+                     (normal(CHAOS(Delayable))))\diff(Events,{tock}))
+
+assert TOCKS [FD= TimingConsistency
+
+
+-- The Safety condition completely ignored time (although, if you change some
+-- of the timing constants enough, you will find it relies upon timing for
+-- it to be satisfied).  Because of the way we are modelling time, the
+-- main liveness constraint (that the gate is up when prudent) actually
+-- becomes a safety condition (one on traces).  It is the combination of this
+-- with the TOCKS condition above (asserting that time passes) that gives
+-- it the desired meaning.
+
+-- We will specify that when X units of time has passed since the last
+-- train left the gate, it must be open, and remain so until another
+-- train enters the system.  This is done by the following,  which monitor
+-- the number of trains in the system and, once the last has left, no
+-- more than X units of time pass (tock events) before the gate is up.  The
+-- gate is not permitted to go down until a train is in the system.
+
+LiveUp = tock -> LiveUp
+         [] enter?i!1 -> LiveBusy(1)
+
+LiveBusy(n) = tock -> LiveBusy(n)
+              [] enter?i!1 -> LiveBusy(if n < GateSeg then (n+1) else n)
+              [] leave?i!GateSeg ->(if n==1 then UpBefore(X) else LiveBusy(n-1))
+              [] gate?x -> LiveBusy(n)
+
+UpBefore(m) = (if m != 0 then (tock -> UpBefore(m-1)) else STOP)
+              [] gate?x -> (if x==up then LiveUp else UpBefore(m))
+              [] enter?i!1 -> LiveBusy(1)
+                 
+X = 5
+
+-- Initially the gate is up in the system, so the liveness condition takes
+-- this into account.
+
+GateLive = LiveUp [|{|tock,gate,enter.i.1,leave.i.GateSeg | i <- TRAINS|}|]
+           CHAOS(Events)
+
+assert GateLive [T= System
+

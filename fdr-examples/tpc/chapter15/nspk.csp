@@ -1,0 +1,335 @@
+-- nspk.csp
+
+-- The Needham-Schroeder Public-Key protocol
+
+-- Bill Roscoe
+
+-- Illustrating Section 15.3
+
+-- This is one of many examples of crypto protocols that have been coded
+-- for FDR, and the techniques for doing this coding remain an important
+-- research topic.  You should be able to find another of other examples
+-- on this and linked web-sites, and if you are interested in this subject
+-- should certainly read about Gavin Lowe's tool CASPER which codes files
+-- not dissimilar from this one from a more abstract protocol notation.
+
+-- The modelling in this file is sometimes rather subtle.  You are
+-- strongly recommended to read the relevant section of the book for
+-- more explanation of what is going on.
+
+--/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\/~\
+
+-- DATA
+
+-- The main challenge in this sort of coding is the representation of
+-- operations such as encryption.  Invariably the chosen representations
+-- are constructed data types such as:
+
+datatype fact = Sq. Seq(fact) |
+		PK. (fact , fact) |
+		Encrypt. (fact, fact) |
+		Alice | Bob | Cameron |
+		Na | Nb | Nc |
+		pkA | pkB | pkC |
+		skA | skB | skC |
+		AtoB | BtoA | Cmessage
+
+-- Sq builds sequences, PK public-key encryptions and Encrypt symmetric-
+-- key encryptions.
+
+-- The roles of the various constants are as follows:
+
+agents = {Alice, Bob, Cameron}
+
+publickey = {pkA, pkB, pkC}
+
+secretkey = {skA, skB, skC}
+
+nonces = {Na, Nb, Nc}
+
+sessmess = {AtoB, BtoA, Cmessage}
+wholemess = {Sq.<a,m> | m <- sessmess, a<-agents}
+
+-- The relationships between nodes, public and private keys are established:
+
+keybindings = {(Alice,pkA,skA), (Bob,pkB,skB), (Cameron, pkC, skC)}
+
+pk(A) = pick({k | (A',k,_) <- keybindings, A==A'})
+
+sk(A) = pick({k | (A',_,k) <- keybindings, A==A'})
+
+dual(k) = pick(Union({
+                {k'' | (_,k',k'') <- keybindings, k==k'},
+                {k' | (_,k',k'') <- keybindings, k==k''}
+		      }))
+
+pick({x}) = x
+
+-- Two functions for creating encryptions:
+
+pke(k,m) = PK . (k , m)
+encrypt(k,m) = Encrypt . (k , m)
+
+-- Channels take messages from agent to agent, and are liable to
+-- interception and faking by the intruder:
+
+channel comm,take,fake:agents.agents.messages
+
+--\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/\_/
+
+-- Creating trustworthy nodes: each node has a list of nonces it can
+-- use in sessions.  When this runs out it stops:
+
+User(id,ns) = if ns == <> then STOP else
+              Send(id,ns) [] Resp(id,ns)
+
+Send(id,ns) = |~| a:diff(agents,{id}) @ 
+                  comm.id.a.pke(pk(a),Sq.<head(ns),id>) ->
+		  ([] n:nonces @ 
+		      comm.a.id.pke(pk(id),Sq.<n,head(ns)>) -> 
+		      comm.id.a.pke(pk(a),n) -> 
+		      Session(id,a,n,tail(ns)))
+
+
+
+Resp(id,ns) = [] a:diff(agents,{id}) @ 
+              [] n:nonces @
+	      comm.a.id.pke(pk(id),Sq.<n,a>) ->
+                      comm.id.a.pke(pk(a),Sq.<head(ns),n>) ->
+		      comm.a.id.pke(pk(id),head(ns)) ->
+		      Session(id,a,head(ns),tail(ns))
+                   
+
+-- When in a session nodes send each other messages which we choose to
+-- help us detect intrusions
+
+Session(id,a,n,ns) =  comm.id.a.encrypt(n,mess(id,a)) -> Session(id,a,n,ns)
+                     [] ([] m:sessmess @ 
+		      comm.a.id.encrypt(n,Sq.<id,m>) -> 
+			(if ok(id,a,Sq.<id,m>) then Session(id,a,n,ns)
+					     else ERROR))
+                     [] close.id -> User(id,ns)
+channel error
+channel close:agents
+
+mess(Alice,Bob) = Sq.<Bob,AtoB>
+
+mess(Bob,Alice) = Sq.<Alice,BtoA>
+
+mess(_,A) = Sq.<A,Cmessage>
+
+ok(a,b,m) = (mess(b,a)==m) or (b==Cameron)
+ERROR = error -> STOP
+
+-- The two trustworthy nodes are connected together, using renaming
+-- allow for the potential manipulations of the spy:
+
+RenUser(n,ns)  = (User(n,ns)[[comm.n <- comm.n, 
+                              comm.n <- take.n]]
+                            [[comm.p.n <- comm.p.n, 
+			    comm.p.n <- fake.p.n | p <- agents]])
+
+
+Network = (RenUser(Alice,<Na>) [|{|comm.Alice.Bob,comm.Bob.Alice|}|] 
+            RenUser(Bob,<Nb>))
+	    [|union({|comm.Cameron|},{|comm.p.Cameron | p <- agents|})|] STOP
+
+-- The final STOP above removes ambiguity about how the spy interacts as
+-- third parties (using its identity Cameron)
+
+--^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^^*^
+
+-- Building the intruder
+
+-- The only problem in building the intruder process is in allowing it
+-- to construct just those messages for faking that can be justified
+-- on the basis of what it has heard, knew originally, and the rules
+-- of encryption.
+
+-- To analyse this we first define the set of messages that make
+-- sense to the protocol 
+
+message1 = {pke(k,Sq.<n,a>) | k <- publickey, n <- nonces, a <- agents}
+comm1 = {a.b.m | m <- message1, a<-agents, b<-agents, a!=b}
+
+message2 = {pke(k,Sq.<n,n'>) | k <- publickey, n <- nonces, n' <- nonces}
+comm2 = {a.b.m | m <- message2, a<-agents, b<-agents, a!=b}
+
+message3 = {pke(k,n) | k <- publickey, n <- nonces}
+comm3 = {a.b.m | m <- message3, a<-agents, b<-agents, a!=b}
+
+message4 = {encrypt(n,m) | n <- nonces, m <- wholemess}
+comm4 = {a.b.m | m <- message4, a<-agents, b<-agents, a!=b}
+
+-- and can then define a base set of data objects by simply unioning these.
+-- Note that this is finite even though the type fact from which it is
+-- drawn is infinite.
+
+messages = Union({message1,message2,message3,message4})
+comms = Union({comm1,comm2,comm3,comm4})
+
+-- We want to build in the rules that allow the intruder to 
+-- build messages and message components.  A deduction is a pair
+-- (X,f) where X is a finite set of facts and f is one that anyone in
+-- possession of X could build
+
+-- The first set represents the construction and deconstruction of
+-- sequences to and from their parts:
+
+deductions1(X) = {({Sq . m}, nth(j,m)) ,
+                  ({nth(i,m) | i <-{0..#m-1}}, Sq . m) |
+	           Sq.m <- X, j<-{0..#m-1}}
+
+-- The second set is building and decrypting public-key encryptions:
+
+deductions2(X) = {({m, k}, pke(k,m) ) ,
+                  ({pke(k,m), dual(k)}, m) |
+                    PK.(k,m) <- X}
+
+-- And the third is for symmetric encryptions:
+
+deductions3(X) = {({m, k}, encrypt(k,m) ) ,
+                  ({encrypt(k,m), k}, m) |
+                    Encrypt.(k,m) <- X}
+
+
+-- The set of deductions relevant to a set is then the union:
+
+deductions(X) = Union({deductions1(X),deductions2(X), deductions3(X)})
+
+-- The following function allows us to extract a member of a sequence for
+-- use in the above.
+
+nth(i,ms) = if i==0 then head(ms) else nth(i-1,tail(ms))
+
+-- The following function extracts the set of facts obviously relevant to
+-- any given one:
+
+explode(Sq.xs) = union({Sq.xs},Union({explode(x) | x <- set(xs)}))
+explode(PK.(k,m)) = union({PK.(k,m),k,dual(k)},explode(m))
+explode(Encrypt.(k,m)) = Union({{Encrypt.(k,m)},explode(k),explode(m)})
+explode(x) = {x}
+
+-- So we can build the finite set of all interesting facts from messages:
+
+AllFacts = Union({explode(m) | m <- messages})
+
+-- and all interesting deductions:
+
+AllDeductions = deductions(AllFacts)
+
+-- We can cut down the set of deductions and facts that actually
+-- have to be incorporated into the intruder by establishing which
+-- are in some sense reachable given its initial knowledge and what
+-- it might conceivably hear:
+
+PossibleBasicKnowledge = union(Known,messages)
+
+KnowableFacts = Close(PossibleBasicKnowledge)
+
+LearnableFacts = diff(KnowableFacts,Known)
+
+Deductions = {(X,f) | (X,f) <- AllDeductions, member(f,LearnableFacts),
+                               not member(f,X), diff(X,KnowableFacts)=={}}
+
+-- Here we build the initial knowledge of the spy to be the basic
+-- "public" knowledge plus what Cameron should know:
+
+Known' = Union({agents,
+               {pk(a) | a <- agents},
+	       {sk(Cameron)},
+	       {Nc,Cmessage}})
+
+-- And close it under deductions:
+
+Close(S) = let S' = {f | (X,f) <- AllDeductions, diff(X,S)=={}}
+           within
+	   if diff(S',S)=={} then S else Close(union(S,S'))
+
+Known = Close(Known')
+
+-- We can now define the processes that make up the compound spy.  An
+-- individual process can learn a fact from or say it to the rest of the
+-- network
+
+channel say,learn:messages
+
+-- and the following channel is what allows deductions between the facts:
+
+channel infer:Deductions
+
+-- finally, for specification purposes, we have a channel that allows the
+-- spy to flag knowledge of events we do not want it to learn
+
+channel spyknows:Banned
+
+-- where Banned is whatever subset of AllFacts we want to forbid, for
+-- example
+
+Banned = {AtoB, BtoA}
+
+-- The process has just two states: either the fact f is known
+-- or it is not.  Note that the two states use opposite ends of a
+-- deduction so that an infer.(X,f) event can happen only when f is
+-- not known and all of X is.
+
+ignorantof(f) = member(f,messages) & learn.f -> knows(f)
+                [] infer?t:{(X,f') | (X,f') <- Deductions, f'==f} -> knows(f)
+
+knows(f) = member(f,messages) & say.f -> knows(f)  
+           [] member(f,messages) & learn.f -> knows(f)  
+           [] infer?t:{(X,f') | (X,f') <- Deductions, member(f,X)} -> knows(f)
+	   [] member(f,Banned) & spyknows.f -> knows(f)
+
+-- The following is the alphabet of the above process for parallel composition:
+
+AlphaL(f) = Union({{say.f,learn.f | member(f,messages)},
+                  {spyknows.f | member(f,Banned)},
+                  {infer.(X,f') | (X,f') <- Deductions, 
+			     (f' == f) or member(f,X)}})
+
+-- There is no need to include the processes representing Known facts,
+-- because removing these processes will not prevent the inference events
+-- with them in the premise.  However those known facts that are proper
+-- messages have to be able to be said to, or absorbed from, the rest
+-- of the network.
+
+SayKnown = say?f:inter(Known,messages) -> SayKnown
+           [] learn?f:inter(Known,messages) -> SayKnown
+
+-- The spy is then constructed by putting all these processes in parallel
+-- hiding the inferences and using the chase operator (designed specifically
+-- for this purpose and described below)
+
+transparent chase
+
+Spy = chase((|| f:LearnableFacts @  [AlphaL(f)] ignorantof(f))\{|infer|})
+      ||| SayKnown 
+
+-- To use the spy in the network proper, we rename it so that the 
+-- messages it learns come from communications it has overheard or intercepted,
+-- and what it says becomes a fake.
+
+RenSpy = (Spy[[say <- say, say <- learn]]
+             [[learn.f <- comm.p.p'.f, learn.f <- take.p.p'.f |
+              p.p'.f <- comms]]
+            [[say.f <- fake.p.p'.f | p.p'.f <- comms]])
+
+
+
+
+
+System = Network [|{|comm,take,fake|}|] RenSpy
+
+
+Sigma = {|comm,take,fake,close,error,spyknows|}
+
+print card(Sigma)
+
+-- We can specify that the two sorts of error are impossible as follows:
+
+assert STOP [T= System\diff(Sigma,{|error|})
+assert STOP [T= System\diff(Sigma,{|spyknows|})
+
+-- and of course either of these finds Lowe's attack on the protocol.
+

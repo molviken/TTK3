@@ -1,0 +1,37 @@
+-- lazic.csp
+
+-- Implementation of Ranko Lazic's algorithm for checking determinism.
+
+channel a,b,c,d
+
+Sigma = {a,b,c,d}
+
+channel clunk -- for the algorithm
+
+-- a simple deterministic process
+
+D = a -> D [] b -> a -> D'
+
+D' = c -> D' [] d -> c -> D
+
+
+-- Two simple nondeterministic processes
+
+ND = a -> ND [] a -> b -> a -> ND
+
+ND2 = a -> ND2 |~| b -> a -> ND2
+
+Clunker = [] x:Sigma @ x -> clunk -> Clunker
+
+Clunking(P) = P[|Sigma|]Clunker
+
+RHS(P) = ((Clunking(P)[|{clunk}|]Clunking(P))[|Sigma|]Repeat)\{clunk}
+
+Repeat = [] x:Sigma @ x -> x -> Repeat
+
+LHS = STOP |~| ([] x:Sigma @ x -> x ->  LHS)
+
+assert LHS [F= RHS(D)
+assert LHS [F= RHS(ND)
+assert LHS [F= RHS(ND2)
+

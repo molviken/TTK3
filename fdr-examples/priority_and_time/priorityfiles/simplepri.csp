@@ -1,0 +1,53 @@
+-- simplepri.csp
+-- Simple illustration of the use of prioritise in FDR
+-- Bill Roscoe May 2012
+
+-- All the assertions in this file have result True.
+
+channel a,b,c
+external prioritise, prioritise_nocache
+
+-- These two functions are equivalent semantically, but create different
+-- internal representations of processes.
+-- The nocache version is more efficient for applying to large
+-- systems, the other one, which keeps more information, may be
+-- better where the processes it is applied to are used in parallel
+-- with others.
+
+-- A deterministic example process
+
+P = a -> P [] b -> (b -> P [] c -> STOP)
+
+-- The following checks come out true because giving a priority over b
+-- means that P can only do a's
+
+assert CHAOS({a}) [F= prioritise(P,<{a},{b},{c}>)
+assert CHAOS({a}) [F= prioritise(P,<{a,c},{b}>)
+assert CHAOS({a}) [F= prioritise(P,<{a},{b}>)
+
+-- In the third of these, c is outside the priority order, but
+-- can't be reached thanks to the priority a > b
+
+-- similarly giving b priority over c guarantees deadlock freedom
+
+assert prioritise(P,<{a,b},{c}>) :[deadlock free]
+assert prioritise(P,<{b},{c}>) :[deadlock free]
+
+-- second of these is the second way of writing prioritise with
+-- a list argument rather than multiple sets as separate ones.o
+
+-- Example with taus in
+
+Q = (a -> Q) [> b -> Q
+
+-- The events in the first set argument are given equal priority to tau
+
+assert prioritise(Q,<{a,b},{c}>) [FD= Q
+assert Q [FD= prioritise(Q,<{a,b},{c}>)
+
+-- whereas all others are given lower priority
+
+BS = b -> BS
+
+assert prioritise(Q,<{},{a,b},{c}>) [FD= BS
+assert BS [FD= prioritise(Q,<{},{a,b},{c}>) 

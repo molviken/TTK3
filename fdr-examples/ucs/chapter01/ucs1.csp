@@ -1,0 +1,273 @@
+-- uc1.csp 
+
+-- simple examples of CSP processes
+
+-- A.W. Roscoe, June 2010 (partly based on chapter1.csp from TCP)
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of all the main CSP processes in chapter 1 of those into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE
+
+-- we can declare two simple events thus
+
+channel up, down
+
+-- and define processes based on them
+
+P0 = up -> down -> up -> down -> STOP
+
+P1 = up -> down -> P1
+
+P2 = up -> down -> up -> down -> P2
+
+-- and the mutually recursive pair
+
+Pu = up -> Pd
+
+Pd = down -> Pu
+
+-- you will find that Pu, P1 and P2 are all trace equivalent (i.e., they
+-- trace-refine each other), and in fact are equivalent in all senses
+-- P0 trace-refines them, but not the reverse.   The following lines in
+-- a file place the conjectured checks in a window of FDR2 
+
+assert P1 [T= P2
+assert P1 [F= P2
+assert P1 [FD= P2
+
+assert P2 [T= Pu
+assert Pu [T= P1
+
+assert P0 [T= P1
+assert P1 [T= P0
+
+channel getup,eat,breakfast,work,lunch,play,dinner,tv,gotobed,sleep,wake,swim,jog,read
+
+Day = getup -> breakfast -> work -> lunch -> play -> dinner -> 
+      tv -> gotobed -> STOP
+
+Groundhog_Day = getup -> breakfast -> work -> lunch -> play -> dinner -> 
+                tv -> gotobed -> Groundhog_Day
+
+assert Groundhog_Day [T= Day
+assert Day [T= Groundhog_Day
+
+-- You can get a further equivalent process by typing  up -> Pd  as the
+-- specification or implementation
+
+-- There is no direct representation of guarded
+-- alternative in machine readable CSP (because it is generalised by [],
+-- which is how external choice is represented)
+
+UandD = up -> down -> STOP
+        [] down -> up -> STOP
+
+
+channel a,b
+
+B0 = a -> B0 [] b -> B1
+B1 = a -> B0 [] b -> STOP
+
+-- Above, B0 is the process (labelled P in the notes) which STOPs when
+-- supplied with two consecutive b's
+
+-- You can illustrate this by using it as a specification and
+
+BX = a -> B0 [] b -> a -> b -> a -> b -> a -> a -> b -> b -> b -> STOP
+
+-- as an implementation -- and debugging what you discover from the following
+
+assert B0 [T= BX
+
+-- The following is a typical definition by one-stap tail recursion
+
+Asleep = sleep -> Asleep
+         [] wake -> InBed
+
+InBed = sleep -> Asleep
+        [] read -> InBed
+        [] tv -> InBed
+        [] getup -> Up
+
+Up = gotobed -> InBed
+     [] read -> Up
+     [] eat -> Up
+     [] lunch -> Up
+     [] breakfast -> Up
+     [] dinner -> Up
+     [] tv -> Up
+     [] work -> Up
+     [] play -> Up
+
+assert InBed [T= Groundhog_Day
+assert Up [T= Groundhog_Day
+
+
+
+-- The COUNT processes are defined:
+
+COUNT(n) = if n==0 then (up -> COUNT(1))
+                   else (up -> COUNT(n+1) [] down -> COUNT(n-1))
+
+-- note that the pattern matching style of definition is not explicitly
+-- supported: you have to put the conditional in by hand
+
+-- NOTE THAT THE ABOVE PROCESS IS INFINITE STATE!  Checking it (as you can
+-- verify) does not terminate.  Note that there is an INTERRUPT button on FDR
+-- if you get fed up of compiler output.  It is, however, entirely safe 
+-- to run ProBE on it and most other infinite-state processes, and you are
+-- encouraged to do so.
+
+-- We can limit the counter by introducing
+-- a parameter to represent the upper limit
+
+
+LCOUNT(L,n) =  (n<L & up -> LCOUNT(L,n+1))
+              [](n>0 & down -> LCOUNT(L,n-1))
+
+-- What refinements do you think apply between the following processes
+-- (think before you try it!)?
+
+-- LCOUNT(100,0)  LCOUNT(200,0)  LCOUNT(100,50)  LCOUNT(100,100) LCOUNT(200,10)
+
+-- On the basis of your thinking and/or what you discovered from
+-- this, formulate a result about when LCOUNT(n,m) trace-refines LCOUNT(p,q)
+
+
+-- Something else not supported absolutely literally in machine-readable
+-- CSP is the general prefix choice ?x:A -> P  however exactly the same
+-- effect can be achieved using the indexed form of the external choice
+-- operator
+
+Sigma = {a,b,up,down}
+
+-- (Normally the entire alphabet is refered to by the identifier Events, but
+-- to use this here would bring in all the other events introduced below.)
+
+REPEAT = [] x:Sigma @ x -> x -> REPEAT
+
+-- is the way we would write the process REPEAT from the notes.
+-- this means "apply the [] operator over the set of processes you get from
+-- the expression to the right of @ as you vary x over the given set.  In
+-- printed CSP this would be written vaguely like
+
+--  [] x -> x -> REPEAT
+-- x in Sigma                 (i.e., a subscript to [],  in = set membership)
+
+
+-- Try writing versions of REPEAT that insist on three and four of everything,
+-- rather than the above two.  What refinements hold?
+
+-- We have to make a clear distinction between numbers (etc) and events in
+-- machine-readable CSP.  Therefore the example INIT cannot use undecorated
+-- numbers as events: we have to declare a channel, and it would be as well
+-- if that channel is not infinite in type, so we have to decide on a finite
+-- range for the initialisation.  
+
+NUM = {0..100}
+
+channel init:Int
+
+INIT = init?x:NUM -> LCOUNT(100,x)
+
+-- Note that FDR/ProBE do support CHANNEL based prefix-choice.
+
+-- A useful data set for applications which are insensitive to which type they
+-- are carrying is
+
+DATA = {0,1}
+
+-- It is useful to have more than one thing, but keeping it small gives
+-- quicker checks.  (One can show that two is in often, in a formal sense,
+-- sufficient).
+
+channel left, right:DATA
+
+COPY = left?x -> right!x -> COPY
+
+-- The infinite buffer process is, of course, infinite state:
+
+Binf(s) = if s==<> then left?x -> Binf(<x>)
+                   else (left?x -> Binf(s^<x>)
+                        [] right!head(s) -> Binf(tail(s)))
+
+-- Note that the sequence has turned round from the version in the notes: we
+-- put things on at the right and take them off the left.  This is because of
+-- the existence of head(), of course.
+
+-- The obvious finite state analogue is
+
+BN(s,N) = if s==<> then left?x -> BN(<x>,N)
+          else if #s == N then right!head(s) -> BN(tail(s),N)
+                   else (left?x -> BN(s^<x>,N)
+                        [] right!head(s) -> BN(tail(s),N))
+
+-- which accepts up to N.  How many states do you think this process has as
+-- a function of (i) N and (ii) the size of DATA?  What trace refinements hold
+-- between these processes?
+
+-- The nondeterministic analogues:
+
+-- The most nondeterministic buffer of them all
+
+Buff(<>) = left?x -> Buff(<x>)
+
+Buff(s^<y>) = right!y -> Buff(s)
+           [] (STOP |~| left?x -> Buff(<x>^s^<y>))
+
+
+NBuff(N,<>) = left?x -> NBuff(N,<x>)
+
+NBuff(N,s^<y>) = right!y -> NBuff(N,s)
+           [] #s < N-1 & (STOP |~| left?x -> NBuff(N,<x>^s^<y>))
+
+assert NBuff(4,<>) [T= NBuff(3,<>)
+assert NBuff(3,<>) [T= NBuff(4,<>)
+
+channel aleft,aright:{ -5..5}
+
+Abs1 = aleft?x -> aright!(if x <0 then -x else x) -> Abs1
+Abs2 = aleft?x -> (if x < 0 then aright!(-x) -> Abs2
+                           else aright!x -> Abs2)
+
+assert Abs1 [T= Abs2
+assert Abs2 [T= Abs1
+   
+
+
+channel cleft, cright
+
+-- Thus the definition
+
+--COUNTER(n,m) = (if 0 < n then (down -> COUNTER(n-1,m)) else STOP)
+--              [] (if n < 7 then (up -> COUNTER(n+1,m)) else STOP)
+--              [] (if 0 < m then (cleft -> COUNTER(n,m-1)) else STOP)
+--              [] (if m < 7 then (cright -> COUNTER(n,m+1)) else STOP)
+
+-- Is more elegantly written
+
+COUNTER(n,m) =   (0 < n & down -> COUNTER(n-1,m))
+              [] (n < 7 & up -> COUNTER(n+1,m))
+              [] (0 < m & cleft -> COUNTER(n,m-1))
+              [] (m < 7 & cright -> COUNTER(n,m+1))
+
+
+-- Note we had to use names different to left and right since these are already
+-- channels.  
+
+
+-- You should note that FDR cannot prove GENERAL versions of algebraic laws
+-- such as (P [] (Q |~| R)) = (P [] Q) |~| (P [] R), but of course it will
+-- verify versions of these laws where all the process variables have
+-- been instantiated.
+
+ 
+-- Defninition of standard processes
+
+RUN(X) = [] x:X @ x -> RUN(X)
+
+-- The above is a very useful definition: you will find it in many of these
+-- example files.
+
+

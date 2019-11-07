@@ -1,0 +1,38 @@
+-- mergesort.csp
+
+-- This is an infinite state process that will not run on FDR,
+-- but it will on ProBE
+
+T = {0..10} -- The type being sorted.
+
+end = -1    -- marker for end of list
+            -- could have used constructed datatypes instead
+
+T' = union(T,{end})
+
+channel in,out,upto,downto,upfrom,downfrom:T'
+
+M = in.end -> out.end -> M
+    [] in?x:T -> M1(x)
+
+M1(x) = in.end -> out!x -> out.end -> M
+        [] in?y:T -> 
+           (((upto!x -> downto!y -> Mu)
+            [upto <-> in, upfrom <-> out] M)
+            [downto <-> in, downfrom <-> out] M)
+
+Mu = in.end -> upto.end -> downto.end -> O1
+     [] in?x:T -> upto.x -> Md
+
+Md = in.end -> upto.end -> downto.end -> O1
+     [] in?x:T -> downto.x -> Mu
+
+O1 = upfrom?x -> downfrom?y -> O2(x,y)
+
+O2(x,y) = (x==end and y==end)& out.end -> Mu
+          [] (x==end and y!=end) & out.y -> downfrom?y' -> O2(x,y')
+          [] (x!=end and y==end) & out.x -> upfrom?x' -> O2(x',y)
+          [] (x!=end and y!=end) & if x < y then out.x -> upfrom?x' -> O2(x',y)
+                                            else out.y -> downfrom?y' -> O2(x,y')
+
+

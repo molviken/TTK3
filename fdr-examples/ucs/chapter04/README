@@ -1,0 +1,12 @@
+The files in this directory represent the case studies in Chapter 4, except that
+swp.csp is the Sliding Window Protocol, not itself described in the book, is
+an extended version of the Alternating Bit Protocol.  Aside from sudoku.csp,
+abp.csp and swp.csp, all the .csp files relate to the section on  routing.
+
+Virtual routing (the "Mad Postman") can be found in the directory for Chapter 8,
+where it provides an interesting example of compression.
+
+Several of the files use hiding, not introduced till Chapter 5.
+
+Several of these examples reappear in modified form in later chapters.
+

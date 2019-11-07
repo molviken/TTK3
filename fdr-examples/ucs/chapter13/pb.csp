@@ -1,0 +1,94 @@
+-- pb.csp
+
+-- See chapter 13 of Understanding Concurrent Systems
+-- Example of AOS and normal forms
+
+-- Though this illustrates the processes and methods from Chapter 13,
+-- the reader should bear in mind that FDR (in 2010) does not implement
+-- FL#, FL or A, all models relevent to this the transformations in
+-- the book.  Therefore the assertions in this file do not reflect
+-- the full equivalences between the terms considered. 
+
+channel a,b
+
+PB = Q /\ (b -> (SKIP [] DIV))
+
+Q = (a -> STOP) |~| (b -> (DIV [] a -> STOP))
+
+DIV = DIV |~| DIV
+
+PB' = PB;SKIP  -- to ensure semantics of termination are
+               -- correct
+
+
+--
+
+-- Derived from transformed LTS
+
+TPB = (b -> B) [> A1
+
+B = SKIP |~| DIV
+
+A1 = P1 |~| P2
+
+P1 = (a -> P3) [] (b -> B)
+
+P2 = b -> A2
+
+P3 = b -> B
+
+A2 = B |~| C
+
+C = (a -> P3 [] b -> B) [> DIV
+
+-- [R= and [RD= are the two finest refinement relations
+-- presently implemented by FDR 
+-- Both are implied by [R#= and [FD#=
+
+assert PB' [R= TPB
+assert PB' [RD= TPB
+assert TPB [R= PB'
+assert TPB [RD= PB'
+
+--
+-- The LNF
+
+PBNF = (a -> PBNF1 [] b -> PBNF2) [>
+       ((a -> PBNF1 [] b -> PBNF3) |~| (b -> PBNF2))
+
+PBNF1 = (b -> PBNF3) [> (b -> PBNF3)
+
+PBNF2 = (a -> PBNF1 [] b -> PBNF3) [> (SKIP |~| DIV)
+
+PBNF3 = STOP [> (SKIP |~| DIV)
+
+assert PB' [R= PBNF
+assert PB' [RD= PBNF
+assert PBNF [R= PB'
+assert PBNF [RD= PB'
+
+-- 
+
+PB1 = (a -> STOP) /\ P3
+PB2 = (b -> (DIV [] a -> STOP)) /\ P3
+
+
+assert PB' [R= PB1 |~| PB2
+assert PB' [RD= PB1 |~| PB2
+assert PB1 |~| PB2 [R= PB'
+assert PB1 |~| PB2 [RD= PB'
+
+
+AOSPB1 = (a -> P3)[]P3
+
+AOSPB2 = b -> (((a -> P3)[>(P3 [> DIV))
+              |~| (SKIP |~| DIV))
+
+assert AOSPB1 [R= PB1 
+assert AOSPB1 [RD= PB1 
+assert PB1 [R= AOSPB1 
+assert PB1 [RD= AOSPB1 
+assert AOSPB2 [R= PB2 
+assert AOSPB2 [RD= PB2 
+assert PB2 [R= AOSPB2 
+assert PB2 [RD= AOSPB2 

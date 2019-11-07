@@ -1,0 +1,50 @@
+-- revivals.csp
+
+-- illustrating the discriminating power of the revivals model
+
+-- See Chapter 11 of UCS.
+
+channel a,b,c,d
+
+Sigma = {a,b,c,d}
+
+-- Exercise: repeat the file chapter10/failsim.csp for the
+-- stable revivals and revivals/divergences model
+
+-- To illustrate that revivals are more discriminating than failures:
+
+P1 = (a -> STOP) [> STOP
+
+P2 = (a -> STOP) |~| STOP
+
+assert P1 [F= P2
+assert P1 [V= P2
+assert P2 [V= P1
+
+-- We can specify using revivals that the whole
+-- of B is accepted whenever any member of A
+-- is offered:
+
+BwhenA(A,B) = STOP |~| (|~| x <- diff(Sigma,A) @ x -> BwhenA(A,B) )
+                   |~|((|~| x:A @ (x -> BwhenA(A,B)))[]([]y:B @ y -> BwhenA(A,B)))
+                   |~| SKIP
+
+-- Two versions of CHAOS:
+
+CHAOSR = STOP |~| SKIP |~| (|~| x:Sigma @ x -> CHAOSR)
+CHAOSF = STOP |~| SKIP |~| ([] x:Sigma @ x -> CHAOSF)
+
+assert CHAOSR [F= CHAOSF
+assert CHAOSF [F= CHAOSR
+assert CHAOSR [V= CHAOSF
+assert CHAOSF [V= CHAOSR
+
+assert CHAOSF [F= BwhenA({a,b},{c,d}) 
+assert BwhenA({a,b},{c,d}) [F= CHAOSF
+assert BwhenA({a,b},{c,d}) [V= CHAOSF
+assert BwhenA({a,b},{c,d}) [V= CHAOSR
+
+
+
+
+

@@ -1,0 +1,115 @@
+-- t-ut1.csp
+
+-- Relating a timed implementation to an untimed specification.
+
+-- Bill Roscoe, June 1994, adapted September 1997
+
+-- (with thanks to John O'Leary for posing the question)
+
+-- This file implements the method for relating a timed process
+-- and an untimed specification discussed in Section 14.4.1
+-- The alternative method discussed in Section 14.4.2 is illustrated in
+-- t-ut2.csp
+
+DATA = {0,1}
+
+channel left,mid,right:DATA
+
+channel tock
+
+-- The sender process waits for an input, and then outputs it on the next
+-- time interval (i.e., after exactly one tock).  It then waits three tocks
+-- before being able to input again.
+
+S = tock -> S [] left?x -> tock -> mid!x -> tock -> tock -> tock -> S
+
+
+-- The receiver waits for an input, then outputs and returns to initial state
+-- on the next two time intervals.
+
+R = tock -> R [] mid ? x -> tock -> right!x -> tock -> R
+
+-- The system is put together by synchronising and hiding the shared data
+-- channel. and synchronising on tock (as ever).
+
+TIMP = (S [|{|tock,mid|}|] R)\{|mid|}
+
+-- Thinking about this, it is clear that the output must have occurred before
+-- three tocks have happened since the corresponding input.  This is before
+-- the next input is possible and therefore this process behaves, in an
+-- untimed sense, like a one-place buffer:
+
+COPY = left?x -> right!x -> COPY
+
+-- even though the untimed analogues of S and R would behave like a two-place
+-- buffer.  Note that there is (in common with assumptions we often make in
+-- this timed style) an assumption that the output on right is not refusable
+-- by the environment.
+
+-- The following approach shows how, given a bound N, insist that refusal
+-- conditions are satisfied by N time units after each visible non-time event.
+-- This bound may be important to the specifier, or he/she might only care
+-- that there is some N that works (increasing N will make the specification
+-- more liberal at the expense of increasing the state-space).
+
+
+-- A value of N which works in this example is...
+
+N = 2
+
+-- We transform the timed implementation process by allowing either of two
+-- sorts of tock events when the original communicates the original one:
+
+channel tock1,tock2,a
+
+RTIMP = TIMP[[tock <- x | x <- {tock1, tock2}]]
+
+-- and defining a process (Reg) that specifies that the first N tocks after
+-- any visible event (or the beginning of time) are tock1's, and any 
+-- subsequent ones tock2's.
+
+REG(n) = a -> REG(N)
+       [] (if n==0 then tock2 -> REG(n) else tock1 -> REG(n-1))
+
+Reg = REG(N)[[a <- x | x <- diff(Events,{tock,tock1,tock2})]]
+
+-- The effect of putting these two processes in parallel:
+
+RegTIMP = RTIMP [|Events|] Reg
+
+-- is to create a process identical to TIMP except that the first N if any
+-- run of tocks become tock1's, the rest tock2's.
+
+-- The trick now is to hide the tock1's (which cannot create divergence),
+-- and to use lazy abstraction on the tock2's.  In our case we must prove
+
+assert COPY [F=  LAbs({tock2})(RegTIMP\{tock1})
+
+
+-- This establishes that the refusal of the implementation process is correct
+-- when either (i) N time units have passed either from the beginning or the
+-- last non-tock event or (ii) the process insists on a communication before
+-- allowing time to pass (i.e., relies on communication with the environment).
+
+-- Of course you should try varying the timing behaviour of the implementation, -- and the value of N, to see what effects these have.  If you do change the
+-- implementation you should of course ensure that the universal timed sanity
+-- check, that
+
+TOCKS = tock -> TOCKS
+
+-- is failures-divergence refined by
+
+HIMP = (TIMP[|D|]CHAOS(D)) \ diff(Events,{tock})
+
+-- still holds, where 
+
+D = {|left|}
+
+-- are the events that the environment is assumed to be able to delay.
+
+assert TOCKS [FD= HIMP
+
+LAbs(X)(P) = (P [|X|] CHAOS(X))\X
+
+
+

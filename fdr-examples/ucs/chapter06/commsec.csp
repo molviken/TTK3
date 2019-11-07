@@ -1,0 +1,182 @@
+-- commsec.csp
+
+-- illustrating the use of abstraction and determinism for checking
+-- information-flow security properties
+
+-- This file is only slightly adapted from the TCS version, so in particular
+-- goes more deeply into this example than Section 6.5 of UCS.
+-- See Example 12.4.1 in TCS
+
+-- Bill Roscoe
+
+-- We have two low-clearance, and two high-clearance, users
+
+datatype names = lois | leah | hugh | henry
+
+-- who send each other messages (a data type of size 2 being enough
+-- by the arguments in chapter 17 on data independence)
+
+datatype data = Zero | One
+
+-- In this example Hugh always sends messages to Henry, and Lois to Leah,
+-- so we only need one name field on the messages transacted with the users
+-- (the name identifies who is communicating, the other party being implicit)
+
+channel send, rec: names.data
+
+-- The input to the communication medium carries sender and address fields
+
+channel in: names.names.data
+
+channel out: names.data
+
+-- The sets of high and low level actions
+
+H = {|send.n, rec.n | n <- {hugh, henry}|}
+
+L = {|send.n,rec.n | n <- {lois, leah}|}
+
+---*--*--*--*--*--*--*--*--*--*--*--*--*--*--*--*--*--*--*--*--*--*--*--*--*-
+
+-- Version 1
+
+-- A naive version in which the two channels share a common medium:
+
+SendL = send.lois?x -> in.lois.leah!x -> SendL
+
+SendH = send.hugh?x -> in.hugh.henry!x -> SendH
+
+RecL = out.leah?x -> rec.leah!x -> RecL
+
+RecH = out.henry?x -> rec.henry!x -> RecH
+
+Medium = in?s?t?x -> out!t!x -> Medium
+
+System1 = (((SendL ||| SendH) [|{|in|}|] Medium)
+            [|{|out|}|](RecL ||| RecH))\{|in,out|}
+
+-- Lazy abstraction (defined over the stable failures model)
+
+LAbs(h)(P) = (P[|h|]CHAOS(h))\h
+
+-- The insecurity of this version is demonstrated by the check
+
+assert LAbs(H)(System1) :[deterministic [F]]
+
+--=#==#==#==#==#==#==#==#==#==#==#==#==#==#==#==#==#==#==#==#==#==#==#==#==#=
+
+-- Version 2
+
+-- Security is attained in this version at the expense of throwing away
+-- messages between Hugh and Henry:
+
+Medium2 = in.lois?t?x -> out!t!x -> Medium2
+         [] in.hugh?t?x -> Medium2'(t,x)
+
+Medium2'(t,x) = in.lois?t'?x' -> out!t'!x' -> Medium2
+               [] out.t!x -> Medium2
+
+System2 = (((SendL ||| SendH) [|{|in|}|] Medium2)
+            [|{|out|}|](RecL ||| RecH))\{|in,out|}
+
+-- security is demonstrated by the check
+
+assert LAbs(H)(System2) :[deterministic [F]]
+
+-- but the inadequacy of this implementation to high-level users is
+-- demonstrated by the check
+
+BN(N,s,left,right) = #s<N & left?x -> BN(N,s^<x>,left,right)
+                  [] #s>0 & right!head(s) -> BN(N,tail(s),left,right)
+
+assert BN(3,<>,send.hugh,rec.henry) [T= LAbs(L)(System2) 
+
+-- showing that the high view loses messages (note this is only a trace
+-- check) even though the low-level view is highly reliable
+
+assert BN(3,<>,send.lois,rec.leah) [F= LAbs(H)(System2) 
+
+--/%//%//%//%//%//%//%//%//%//%//%//%//%//%//%//%//%//%//%//%//%//%//%//%//%/
+
+-- Version 3:
+
+-- This version makes the process SendH re-send lost messages:
+
+channel ok,ref
+
+SendH3 = send.hugh?x -> in.hugh.henry!x -> SendH3'(x)
+
+SendH3'(x) = ok -> SendH3
+            [] ref -> in.hugh.henry!x -> SendH3'(x) 
+
+Medium3 = in.lois?t?x -> out!t!x -> Medium3
+         [] in.hugh?t?x -> Medium3'(t,x)
+
+Medium3'(t,x) = in.lois?t'?x' -> ref -> out!t'!x' -> Medium3
+               [] out.t!x -> ok ->  Medium3
+
+System3 = (((SendL ||| SendH3) [|{|in,ok,ref|}|] Medium3)
+            [|{|out|}|](RecL ||| RecH))\{|in,out,ok,ref|}
+
+-- This retains security:
+
+assert  LAbs(H)(System3) :[deterministic [F]]
+
+-- while improving the high-level utility:
+
+assert BN(3,<>,send.hugh,rec.henry) [T= LAbs(L)(System3) 
+
+-- without changing the low view
+
+assert BN(3,<>,send.lois,rec.leah) [F= LAbs(H)(System3) 
+
+--/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\/^\
+
+-- Even in version 3 the high users can be blocked by the low ones:
+-- the process LAbs(L)(System3) is nondeterministic
+
+-- This can be avoided by using more flow control, implemented here as
+-- back-messages from Henry's process to Hugh's, and from Leah's to
+-- Lois's.  The content of these back messages are irrelevant; they are
+-- just acknowledgement packets.
+
+SendL4 = send.lois?x -> in.lois.leah!x -> out.lois?x -> SendL4
+
+SendH4 = send.hugh?x -> in.hugh.henry!x -> out.hugh?x -> SendH4
+
+RecL4 = out.leah?x -> rec.leah!x -> in.leah.lois.Zero -> RecL4
+
+RecH4 = out.henry?x -> rec.henry!x -> in.henry.hugh.Zero -> RecH4
+
+
+System4 = ((SendL4 ||| SendH4 ||| RecL4 ||| RecH4) 
+             [|{|in,out|}|] Medium)\{|in,out|}
+
+
+-- Not only is this secure
+
+assert LAbs(H)(System4) :[deterministic [F]]
+
+-- But both views are now deterministic:
+
+assert BN(1,<>,send.hugh,rec.henry) [F= LAbs(L)(System4)
+assert BN(1,<>,send.lois,rec.leah) [F= LAbs(H)(System4)
+
+--!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!
+
+-- PLEASE NOTE
+
+-- Many of the above checks are based (for reasons discussed in the
+-- text) on failures determinism checking of processes which can actually
+-- diverge in the representations given in this file.  With such checks,
+-- at the time of writing, it is possible that no answer will be found by FDR.
+-- See Section 8.7 for a discussion of this.  One way around this is to
+-- perform the pair of checks:
+
+-- assert P[|H|]STOP :[deterministic [FD]]
+-- assert P[|H|]STOP [F= LAbs(H)(P)
+
+-- as in
+
+assert System4[|H|]STOP :[deterministic [FD]]
+assert System4[|H|]STOP [F= LAbs(H)(System4)

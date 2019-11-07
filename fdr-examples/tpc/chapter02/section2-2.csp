@@ -1,0 +1,170 @@
+-- section2-2.csp 
+
+-- illustrating alphabetized parallel
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of some of the main CSP processes in Section 2.2 of those into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE.  See also the file phils.csp, where the
+-- dining philosophers are implemented.
+
+-- First, the pantomime horse:
+
+channel forward, backward, nod, wag, kick, neigh
+
+-- The example in the book is
+
+Horse = Front [F||B] Back
+
+-- where
+
+B = {forward,backward,wag,kick}
+F = {forward,backward,nod,neigh}
+
+Front = forward -> Front'
+        [] nod -> Front
+
+Back = backward -> Back'
+       [] wag -> Back
+
+-- In order to run this on the tools, we need to give some sort of
+-- interpretation to Front' and Back'.  The least refined ones with the
+-- right alphabets are
+
+Front' = RUN(F)
+Back'= RUN(B)
+
+RUN(X) = [] x:X @ x -> RUN(X)
+
+-- The behaviour of Horse is demonstrated by the checks
+
+assert RUN({nod,wag}) [T= Horse
+assert Horse [T= RUN({nod,wag})
+
+-- Obviously you can adapt this to test your answers to Exercise 2.2.1
+
+--$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+
+-- The following datatype is needed for the buffer examples
+
+T = {0,1}
+
+channel aa,bb,cc:T
+
+COPY'(a,b) = a?x -> b!x -> COPY'(a,b)
+
+-- The combination of two of these processes is then
+
+CC0 = COPY'(aa,bb) [{|aa,bb|}||{|bb,cc|}] COPY'(bb,cc)
+
+-- In the text this is shown equivalent to the process
+
+CC0' = aa?x -> CC1'(x)
+
+CC1'(x) = bb!x -> CC2'(x)
+
+CC2'(x) = cc!x -> CC0'
+       [] aa?y -> CC3'(x,y)
+
+CC3'(x,y) = cc!x -> CC1'(y)
+
+-- and we can test this
+
+assert CC0 [T= CC0'
+assert CC0' [T= CC0
+
+-- (These will work in the other models as well.)
+
+-- To define a chain of buffers it is best to declare an array of channels:
+
+channel dd:Int.T
+
+BCHAIN(N) = || i:{0..N-1} @ [{|dd.i,dd.i+1|}] COPY'(dd.i,dd.i+1)  
+
+-- Since (with T of size 2) each component process has 3 states, and
+-- any combination of these is reachable in BCHAIN, the
+-- complete chain has size 3^N: well illustrating the potential for
+-- exponential growth.  (You can see this growth ny varying N in, for example,
+-- a series of deadlock checks.)
+
+-- NOTE THAT THE DINING PHILOSOPHERS ARE IN A SEPARATE FILE
+
+--&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+-- The ATM and customer with extended interface:
+
+CARD = {1..4}
+
+datatype pinnumbers = PIN.Int
+
+fpin(c) = PIN.c
+
+PINs = {fpin(c) | c <- CARD}
+
+WA = {10,20,30,40,50,60,70,80,90,100}
+
+SpendA = {1..100}
+
+S(1) = {PIN.1,PIN.4,PIN.7}  -- A customer who correctly remembers his
+                            -- PIN amongst others
+
+S(2) = {PIN.1,PIN.3,PIN.7}  -- A customer who does't.
+
+S(n) = {PIN.n}              -- All others are unambiguously right.
+
+
+channel incard, outcard:CARD
+channel pin:PINs
+channel req, dispense:WA
+channel spend:SpendA
+channel refuse
+channel refill
+
+Max = 500 -- The capacity of the ATM
+
+ATMref(n) = (n<Max) & refill -> ATMref(Max)
+            [] incard?c -> pin.fpin(c) -> req?w ->
+                (if w<=n then dispense!w -> outcard.c -> ATMref(n-w)
+			 else refuse -> outcard.c -> ATMref(n))
+
+
+
+CUSTspend(card,0) = incard.card -> pin?p:S(card) -> req.50 ->
+              (dispense?x:{y | y <- WA, y >=50} -> 
+		      outcard.card -> CUSTspend(card,50)
+	      [] refuse -> outcard.card -> CUSTspend(card,0))
+
+CUSTspend(card,n) = |~| x:{x | x <- SpendA, x<=n} @ 
+                          spend.x -> CUSTspend(card,n-x)
+
+ZZ = {|incard,outcard,pin,req,dispense,refuse|}
+
+XX = union(ZZ,{|refill|})
+YY = union(ZZ,{|spend|})
+
+
+RefillandSpend = CUSTspend(3,0) [YY||XX] ATMref(0)
+
+
+-- The above process has relatively
+-- complex behaviours: it is not too hard to find
+-- a parameterized tail recursion equivalent to it, but perhaps
+-- the best thing to try is animating it.  
+
+-- The way that the number of states multiplies up is demonstrated by
+
+assert RefillandSpend :[deadlock free [F]]
+
+-- The number of states created here is not problematic: about 14000
+-- with the parameters included here.  However, it demonstrates
+-- how easily state explosions can happen.  
+
+-- Many of the states appear in this case because of the
+-- nondeterministic choices the customer makes between amounts to
+-- spend.  It is possible to improve this situation: see the
+-- version of this file in the appendixC directory, where
+-- the states created in this way are eliminated reducing the
+-- overall state count to 605.
+

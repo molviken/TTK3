@@ -1,0 +1,77 @@
+-- buffers.csp
+ 
+T = {0,1}
+
+channel left,right:T
+
+-- The failures-divergences specification of a buffer
+
+-- The most nondeterministic buffer
+
+BUFF(<>) = left?x -> BUFF(<x>)
+BUFF(s) = right!head(s) -> BUFF(tail(s))
+          [] (STOP |~| left?x -> BUFF(s^<x>))
+
+-- so BUFF(<>) [FD= B if and only if B is a buffer
+
+-- But this is an infinite-state process and so cannot be used as an
+-- FDR specification.
+
+-- There are two standard approximations to this:
+
+BUFFN(N,<>) = left?x -> BUFFN(N,<x>)
+BUFFN(N,s) = right!head(s) -> BUFFN(N,tail(s))
+          [] #s < N & (STOP |~| left?x -> BUFFN(N,s^<x>))
+
+-- This satisfies BUFF(<>) [FD= BUFF(n+1,<>) [FD= BUFF(n,<>)
+-- and is a buffer that never holds more than N objects:
+
+assert BUFFN(4,<>) [FD= BUFFN(3,<>)
+assert BUFFN(3,<>) [FD= BUFFN(4,<>)
+
+WBUFF(N,<>) = left?x -> WBUFF(N,<x>)
+WBUFF(N,s) = right!head(s) -> WBUFF(N,tail(s))
+          [] (STOP |~| left?x -> (if #s==N then DIV else WBUFF(N,s^<x>)))
+
+DIV = DIV |~| DIV -- the catastrophic divergent process of FD model
+
+-- This satisfies WBUFF(n) [FD= WBUFF(n+1) [FD= BUFF(<>)
+
+-- It is not a buffer (so is called a weak buffer) but behaves
+-- like one until has had at least N+1 items in it at one time.
+
+assert WBUFF(4,<>) [FD= WBUFF(3,<>)
+assert WBUFF(3,<>) [FD= WBUFF(4,<>)
+
+-- So every BUFFN satisfies every WBUFF
+
+assert WBUFF(3,<>) [FD= BUFFN(4,<>)
+
+-- but not vice-versa
+
+assert BUFFN(3,<>) [FD= WBUFF(4,<>)
+assert BUFFN(4,<>) [FD= WBUFF(3,<>)
+
+COPY = left?x -> right!x -> COPY
+
+-- So COPY satisfies all of these specifications
+
+assert BUFFN(1,<>) [FD= COPY
+
+-- But COPY chained with itself does not
+
+assert BUFFN(1,<>) [FD= COPY[right <-> left]COPY
+
+-- chaining BUFFNs together requires us to ADD the sizes:
+
+assert BUFFN(5,<>) [FD= BUFFN(3,<>) [right <->left] BUFFN(3,<>)
+assert BUFFN(6,<>) [FD= BUFFN(3,<>) [right <->left] BUFFN(3,<>)
+
+-- whereas chaining WBUFFNs together means taking the minimum
+
+assert WBUFF(3,<>) [FD= WBUFF(4,<>) [right <->left] WBUFF(3,<>)
+assert WBUFF(4,<>) [FD= WBUFF(4,<>) [right <->left] WBUFF(3,<>)
+assert WBUFF(3,<>) [FD= WBUFF(3,<>) [right <->left] COPY
+assert WBUFF(4,<>) [FD= WBUFF(3,<>) [right <->left] COPY
+
+

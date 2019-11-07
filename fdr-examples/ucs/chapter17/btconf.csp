@@ -1,0 +1,78 @@
+-- btconf.csp
+
+-- Exploring the relationship of buffer tolerance and confluence
+
+-- Specifically, we illustrate that a process is confluent
+-- if and only if placing a one-place inward pointing buffer on
+-- every event makes it deterministic.
+
+transparent sbisim, diamond
+sbdia(P) = sbisim(diamond(P))
+channel in,out
+
+onebuff(e,P) = let C = in -> out -> C
+               within
+                   sbdia((P[e <-> out]C)[[in <- e]])
+
+
+
+
+N = 3
+
+-- A confluent system: Cyclic Communication Network
+
+
+channel  h:{0..N-1}.{0..N}
+channel  v:{0..N}.{0..N-1}
+
+Node(i,j) = h.i.j -> v.i.j -> h.i.j+1 -> v.i+1.j -> Node(i,j)
+
+Alpha(i,j) = {h.i.j,v.i.j,h.i.j+1,v.i+1.j}
+
+Internal = {h.i.j, v.j.i | i <-{0..N-1}, j <-{1..N-1}}
+
+-- So here is a confluent process
+
+Network = (|| i:{0..N-1},j:{0..N-1} @ [Alpha(i,j)] Node(i,j))\Internal
+
+-- Rather than add all the buffers after composing the network, the
+-- compressions involved in adding a buffer will be a lot easier if
+-- we add the buffers to the nodes with external communications.
+
+Node'(i,j) = let 
+             N1 = if i == 0 then onebuff(v.0.j,Node(i,j))
+                      else if i==N-1 then onebuff(v.N.j,Node(i,j))
+                      else Node(i,j)
+             N2 = if j == 0 then onebuff(h.j.0,N1)
+                      else if j==N-1 then onebuff(h.j.N,N1)
+                      else N1
+             within N2
+
+
+BNetwork = (|| i:{0..N-1},j:{0..N-1} @ [Alpha(i,j)] Node'(i,j))\Internal
+
+assert BNetwork :[deterministic]
+
+include "compression09.csp"
+
+BNetworkL = <(Node'(i,j),Alpha(i,j)) | i <- <0..N-1>, j <- <0..N-1>>
+
+CBNetwork = InductiveCompress(sbdia)(BNetworkL)(Internal)
+
+assert CBNetwork :[deterministic]
+
+
+-- A non-confluent process: merge
+
+channel a,b,c
+
+Merge = a -> c -> Merge
+        [] b -> c -> Merge
+
+-- Not confluent because performing a removes the immediate possibility of b.
+
+BMerge = onebuff(a,onebuff(b,onebuff(c,Merge)))
+
+-- This is bound to be nondeterministic because Merge is not confluent.
+
+assert BMerge :[deterministic]

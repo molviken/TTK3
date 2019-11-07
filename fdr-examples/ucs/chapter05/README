@@ -1,0 +1,8 @@
+The files in this directory illustrate the ideas introduced in Chapter 5,
+namely hiding, renaming and link parallel.
+
+There are further illustrations of hiding in action in a number of the files
+for Chapter 4, in sections labelled as being for Chapter 5.
+
+See nonblock.csp, tokring.csp, tree3.csp
+

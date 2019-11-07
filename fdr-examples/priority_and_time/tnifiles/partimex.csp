@@ -1,0 +1,237 @@
+
+-- Time-dependent parallel multiplexer
+-- Example from "Checking noninterence in Timed CSP"
+-- Bill Roscoe, January 2012
+
+external prioritise
+
+-- Standard timing priority operator
+
+pri(P) = prioritise(P,<{},{tock}>)
+
+-- Agent names and relationships
+
+datatype Agent = hugh | henry | lois | leah
+HAgent = {hugh,henry}
+LAgent = {lois,leah}
+
+dual(hugh) = henry
+dual(henry) = hugh
+dual(lois) = leah
+dual(leah) = lois
+
+-- Data types: T is message type, only sensible ones thanks to data independenc
+-- being {0} and {0,1}.  For timing channels, {0} almost certainly enough.
+T = {0}
+
+-- TA is the type carried by internal channels, including an acknowledgement
+TA = union(T,{ack})
+ack=99
+
+channel in,out:Agent.TA --- internal channels: addressee and data
+channel input,output:Agent.T --- internal channels: addressee and message
+channel tock
+
+Sigma = {|input,output|} -- externally visible alphabet
+
+-- Partition of Sigma into High and Low level events
+H = {|input.h,output.h | h <- HAgent|}
+L= {|input.l,output.l | l <- LAgent|}
+
+-- Some event timers
+
+AllOne(_) = 1
+AllTwo(_) = 2
+IM(k,in.x) = 0
+IM(k,out.x) = 0
+IM(k,_) = k
+
+IM1(x) = IM(1,x)
+
+Timed(AllOne){
+
+-- This medium waits for a second input
+
+Medium = in?x?t -> in.x.t ->  out!dual(x)!t -> Medium
+
+-- The L versions of the following make two outputs to the medium.
+-- with one becoming available as quickly as possible after the
+-- preceding event, and the other being delayed by Delta.
+
+LAgentS(n) = input!n?m -> ((in!n!m -> SKIP)||| (WAIT(Delta);in!n!m -> SKIP));  out!n!ack -> LAgentS(n)
+
+LAgentR(n) = out!n?m:T -> output!n!m -> ((in!n!ack ->SKIP )|||(WAIT(Delta); in!n!ack -> SKIP));LAgentR(n)
+
+-- The H versions do not do this, but do wait 1 unit from the end of one
+-- cycle to the beginning of the next. This ensures that they cannot
+-- hog the whole of the medium's capacity.  In fact the time taken by
+-- input.hugh and output.henry is sufficient for this (i.e. we get
+-- noninterference with the WAIT removed), but it seems wise to include
+-- it to remove this dependency.  (Details of required WAITs depend on
+-- event timings.)
+
+HAgentS(n) = input!n?m -> in!n!m -> in!n!m ->  out!n!ack -> WAIT(1); HAgentS(n)
+HAgentR(n) = out!n?m:T -> output!n!m -> in!n!ack -> in.n.ack -> WAIT(1);  HAgentR(n)
+
+Delta = 4   -- increasing this degrades Low service through latency 
+            -- decreasing it may introduce information flow
+            -- the critical value will depend on event timings and other parameters.
+
+-- The processes for parallel composition: Lois and Hugh send,
+-- Leah and Henry receive.
+
+CAgent(lois) = LAgentS(lois)
+CAgent(leah) = LAgentR(leah)
+CAgent(hugh) = HAgentS(hugh)
+CAgent(henry) = HAgentR(henry)
+
+Agents = ||| n:Agent @ CAgent(n)
+
+System = (Medium [|{|in,out|}|] Agents)\{|in,out|}
+
+}
+
+-- Description of intended untimed behaviour
+
+Buff(a,b) = input.a?x -> output.dual(a)!x -> Buff(a,b)
+
+UTS = Buff(lois,leah) ||| Buff(hugh,henry)
+
+assert UTS [T= System\{tock}
+
+-- We would like this in untimed failures too, given a long enough time
+-- for the system to settle:
+
+TAbs(n) = let 
+            TA'(0) = ([] x:Sigma @ x -> TA'(n))
+                     []
+                     (STOP |~| tock -> TA'(0))   
+            TA'(k) = ([] x:Sigma @ x -> TA'(n))
+                     []
+                     tock -> TA'(k-1)
+        within TA'(n)
+
+
+AbsT(n)(P) = (P [|Events|] TAbs(n))\{tock}
+
+-- Checks like the following show how long we wait for refusals.
+
+assert UTS [F= AbsT(10)(pri(System))
+assert UTS [F= AbsT(15)(pri(System))
+
+-- Defining timed lazy abstraction.
+
+LAbs(A)(P) = (CHAOST(A)[|union(A,{tock})|]P)\A
+
+CHAOST(A) = ([] x:A @ x -> CHAOST(A)) [> tock -> CHAOST(A)
+
+AbsSys = LAbs(H)(System)
+AbsSysH = LAbs(L)(System)
+
+-- The check for quasi-determinism
+
+channel tock1, tock2, tock2'
+
+-- We are going to set up a system in which copy 1 "leads" on non-tock events
+-- and copy 2 "follows".  To ensure this order we give copy1 a token which
+-- then passes backwards and forwards between the pair so they strictly
+-- alternate on non-tock events:
+
+ channel to1,to2
+
+R1 =  ([] x:Sigma @ x -> to2 -> to1 ->  R1)
+
+R2 = to2 -> ([] x:Sigma @ x -> to1 -> R2)
+
+
+COPY1(P) = P[[tock <- tock1]][|Sigma|] R1 
+COPY2(P) = P[[tock <- tock2, tock <- tock2']][|Sigma|] R2 
+
+-- (Note that this construction does not allow properly for _tick)
+
+-- The right-hand side of our   check becomes
+
+RHS(P) = (COPY1(P) [|{to1,to2}|] COPY2(P))\{to1,to2} [|diff(Events,{to1,to2})|]MaxReg
+
+-- where 
+
+MaxReg = tock1 -> MaxRegt
+         [] ([]x:Sigma @ x -> x -> MaxReg)
+
+-- This is the state the regulator is in when the two copies are at parity
+-- (in time and trace).
+
+MaxRegt = [] x:Sigma @x -> MaxRegt'(x)
+          [] tock1 -> tock2 -> MaxRegt
+
+-- This is the state the regulator is in when COPY1 is one tock ahead:
+-- if it does another then the second must perform tock to catch up to
+-- only one behind.  If it does an event x then we must test that
+-- either the other copy could not refuse it before its next tock, 
+-- or that it cannot refuse it after.
+
+MaxRegt'(x) = ((x -> STOP [] tock2' -> x -> MaxReg))|~|tock2 -> x -> MaxReg
+
+-- The first branch of this |~| is what tests this under a priority assumption.
+
+-- We give tock2' lower priority here than all other events.  Therefore if
+-- tock2' is performed then x must have been refused, so x is offered
+-- to check that it cannot be refused.
+
+-- We know that the trace <tock2,x>  is possible in COPY2, though it
+-- it is possible for the process to refuse x after tock2 in COPY2
+-- and still behave properly.  So the specification will not say that
+-- x must be accepted after tock2.  We actually need the second clause
+-- to check subsequent behaviour when the x from COPY1 is refused after,
+-- but not before, the tock2 of the first clause.
+
+-- The STOP above corresponds with the case where an event after tock1
+-- has been matched by one before tock2.  In that case the traces are
+-- no longer the same so there is no more to check.
+
+
+-- We compare this process against the failures specification:
+
+LHS = (tock1 -> LHSt
+      [] ([]x:Sigma@(x -> x -> LHS) ))
+      |~| STOP
+
+-- if COPY1 performs an initial x in Sigma, COPY2 must respond.
+
+LHSt = (tock1 -> tock2 -> LHSt -- as with MaxRegt 
+      [] (([] x:Sigma @x -> LHSt'(x))))
+      |~| STOP
+   
+
+LHSt'(x) = ((x -> STOP |~| tock2' -> x -> LHS))
+              |~|tock2 -> ((x -> LHS)|~| STOP)
+
+transparent wbisim
+
+-- The system itself is not quasi-deterministic 
+
+assert LHS [F= prioritise(RHS(wbisim(pri(System))),<diff(Events,{tock2'}),{tock2'}>)
+
+-- but for suitable timing parameters the low-level refinement is ...
+assert LHS [F= prioritise(RHS(wbisim(pri(AbsSys))),<diff(Events,{tock2'}),{tock2'}>)
+
+-- indeed, the abstracted system is then deterministic: no offer made is ever 
+-- withdrawn because of the structure of the terminal processes.
+
+assert pri(AbsSys) :[deterministic]
+
+-- So in fact we can infer determinism and quasi-determinism of the 
+-- continuous version without doubling the metronome beat.
+
+-- As you would expect, the noninterference results do not hold in reverse
+-- (from L to H).
+
+assert LHS [F= prioritise(RHS(wbisim(pri(AbsSysH))),<diff(Events,{tock2'}),{tock2'}>)
+
+assert pri(AbsSysH) :[deterministic]
+
+
+
+
+
+

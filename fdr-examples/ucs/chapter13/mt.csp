@@ -1,0 +1,54 @@
+-- mt.csp
+-- Illustrating normal forms
+
+-- See chapter 13 of Understanding Concurrent Systems
+
+-- Bear in mind that, as with pb.csp, not all the models these
+-- examples are designed for are implemented in FDR in 2010.
+
+channel a,b,c,d
+
+MT = ([] x:{a,b,c} @ x -> (STOP |~| a -> STOP))
+     [> ((a -> STOP) |~| (b -> STOP))
+
+MTRT = ([] x:{a,b,c} @ x -> (STOP |~| a -> STOP))
+       [> (([] x:{a,b} @ x -> STOP) |~| (a -> STOP) |~| (b -> STOP))
+
+assert MT [R= MTRT
+assert MT [RD= MTRT
+assert MTRT [R= MT
+assert MTRT [RD= MT
+
+MTA = ([] x:{a,b,c} @ x -> MT')
+     [> ((a -> MT') |~| (b -> MT'))
+
+MT' = (a -> STOP) |~| STOP
+
+-- no assertions as this model is not implemented
+
+-- Revivals:
+
+MTRV = ([] x:{a,b,c} @ x -> MT')
+      [> (([]x:{a,b}@ x -> MT') |~| (a -> MT') |~| (b -> MT'))
+
+assert MT [V= MTRV
+assert MT [VD= MTRV
+assert MTRV [V= MT
+assert MTRV [VD= MT
+
+-- The following checks illustrate that the revivals normal form
+-- does not work over refusal testing.
+
+assert MTRV [R= MT
+assert MT [R= MTRV
+
+-- The failures normal form
+
+MTF = ([] x:{a,b,c} @ x -> MT')
+      |~| (([]x:{a,b}@ x -> MT') |~| (a -> MT') |~| (b -> MT'))
+
+assert MT [F= MTF
+assert MTF [F= MT
+assert MT [V= MTF
+assert MTF [V= MT
+

@@ -1,0 +1,63 @@
+-- inv.csp
+
+-- Illustrating the use of invariants
+-- for inductive compression on Milner's Scheduler
+
+N = 20
+
+include "compression09.csp"
+
+channel a,b,c:{0..N-1}
+
+-- The original network
+
+Nd(0) = b.0 -> c.0 -> a.1 -> c.0 -> a.0 -> Nd(0)
+
+Nd(r) = a.r -> b.r -> a.(r+1)%N -> c.r -> Nd(r)
+
+Node(r) = (Nd(r),{a.r,b.r,c.r,a.(r+1)%N})
+
+Unconstrained = <Node(N-1-r) | r <- <0..N-1>>
+
+-- Simple invariant saying that end a.i alternate
+
+EI(r) = a.r -> a.0 -> EI(r)
+Constrained = <Node(N-1)>^<(EI(N-2-r),{a.0,a.N-2-r}),Node(N-2-r) | r <- <0..N-2>>
+
+DIV = DIV |~| DIV
+
+-- Permissive invariant which forces a system to DIV if it goes
+-- outside the proper behaviour:
+
+AI(r) = a.r -> AI'(r) [] a.0 -> DIV
+
+AI'(r) = a.0 -> AI(r) [] a.r -> DIV
+
+Assumed = <Node(N-1)>^<(AI(N-1-r),{a.0,a.N-1-r}),Node(N-2-r) | r <- <0..N-2>>
+
+transparent normal
+
+-- This is superior to the simple invariant since it also proves that
+-- the system actually meets the invariant, whereas simple invariants
+-- rely on this.  This style works best for [FD= because of the way FDR
+-- treats DIV, but an alternative and less efficient form is
+
+AEI(r) = a.r -> AEI'(r) [] a.0 -> ERROR
+
+AEI'(r) = a.0 -> AEI(r) [] a.r -> ERROR
+
+ERROR = error -> ERROR
+
+channel error
+
+EAssumed = <Node(N-1)>^<(AEI(N-1-r),{a.0,a.N-1-r}),Node(N-2-r) | r <- <0..N-2>>
+
+assert Rotate(1) [FD= ListPar(Unconstrained)\{|b,c|}
+assert Rotate(1) [FD= InductiveCompress(normal)(Unconstrained)({|b,c|})
+assert Rotate(1) [FD= InductiveCompress(normal)(Constrained)({|b,c|})
+assert Rotate(1) [FD= InductiveCompress(normal)(Assumed)({|b,c|})
+assert Rotate(1) [F= InductiveCompress(normal)(EAssumed)({|b,c|})
+
+Rotate(i) = a.i -> Rotate((i+1)%N)
+
+

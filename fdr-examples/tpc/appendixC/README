@@ -1,0 +1,45 @@
+Of the files in this directory,
+
+pathol.csp
+
+is example C.1.1, illustrating the potential explosion
+of the normalization process.
+
+The rest illustrate the use of FDR2's compression
+functions.  They are as follows:
+
+philsc.csp  dining philosophers with compression (+)(*)
+scheduler.csp  Milner's scheduler (+)(*)
+modcomp.csp modular compression (+)(*)
+swpc.csp    sliding window protocol (*)
+comppuz.csp applying compression to a puzzle
+
+Here (*) denotes a file that uses the high level compression functions
+defined in the file compression.csp, and (+) one that is dealt with
+in Appendix C.
+
+Other examples of the use of compression (some of them very simple
+indeed, and some, especially in the deadlock chapter, remarkably effective) 
+can be found in the following files:
+
+chapter05/section5-1.csp
+chapter12/abp-ft.csp
+chapter13/madpostman.csp (*)
+chapter13/teleph.csp     (*)
+chapter13/matmul.csp     (*)
+chapter13/ring.csp       (*)
+chapter13/subtrack.csp   (*)
+chapter14/crossing.csp
+chapter14/tabp.csp
+chapter15/ddb.csp        (*)
+
+Try to get a feel from some of these files about what sort of systems are
+likely to compress well, and READ APPENDIX C (part 2) before you try
+it yourself!
+
+
+The READ.ME file in chapter13 contains some useful discussion of the
+application of compression strategies for deadlock checking.
+
+
+

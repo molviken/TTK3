@@ -1,0 +1,16 @@
+These files illustrate the tock-CSP style discussed in Chapter 14.
+
+TCOPY.csp illustrates some of the introductory material shared with TPC
+
+bully.csp  is the initial treatment of the bully algorithm
+bullyr.csp  is the corrected version
+
+See also chapter17/zbullyr.csp that demonstrates buffer tolerance properties
+of the latter.
+
+tnonblock.csp and ttokring.csp illustrate the timing properties
+of  two of the routing approaches in Chapter 4.
+
+tringm.csp illustrates the metering technique described in the text.
+
+maxpro.csp  is a simple illustration of the need for maximal progress.

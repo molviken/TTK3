@@ -1,0 +1,33 @@
+-- ucs2.csp
+
+-- Bill Roscoe
+
+-- An example from Chapter 2
+
+channel a,b,c
+
+-- The following implements the recursion which is not known always to
+-- converge....
+
+P(n) = if n==1 then a -> P(1)
+               else if n==(n/2)*2 then P(n/2) else P((3*n+1)/2)
+
+-- and the following implements a version where you can see the numbers
+-- subject to the simulation stopping with b if the bound is exceeded.
+
+NN=4000
+channel d:{1..NN}
+
+Pd(n) = if n>NN then b -> STOP
+        else if n==1 then a -> Pd(1)
+               else d!n -> if n==(n/2)*2 then Pd(n/2) else Pd((3*n+1)/2)
+
+assert P(45) [T= a -> STOP
+
+-- The following allows the exploration of how large the parameter gets
+-- for a given range of starting values.
+
+Bd = a -> Bd [] d?_ -> Bd
+
+assert Bd [T= d?n:{2..100} -> Pd(n)
+

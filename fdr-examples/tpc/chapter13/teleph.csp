@@ -1,0 +1,117 @@
+-- teleph.csp
+
+-- The binary switching network (Example 13.3.4)
+
+include "compression.csp"
+
+transparent normal
+transparent sbisim
+transparent diamond
+transparent explicate
+sbd(P) = sbisim(diamond(sbisim(P)))
+
+-- The node definition is that from the book, and abstracts away from
+-- the choice mechanisms about routing messages:
+
+Node(in,out,swin,swout) = in -> (out -> Node (in,out,swin,swout)
+                                |~| Node'(in,out,swin,swout))
+                          [] swin -> out -> Node(in,out,swin,swout)
+
+Node'(in,out,swin,swout) = swout -> Node(in,out,swin,swout)
+                          [] swin -> out -> Node'(in,out,swin,swout)
+
+
+-- Especially for ProBE, it would make sense to produce a version with
+-- the choice mechanisms implemented properly using the algorithm
+-- described in the text.
+
+-- Our system will be based on a power of two, with a total of K * 2^K
+-- of the above node processes.  The following works fairly easily;
+-- 4 is rather slow and anything bigger out of range at the moment.
+
+K = 3
+
+-- Each lane is essentially parameterized by a K-bit binary number:
+
+lanes(0) = <<>>
+
+lanes(n) = <<0>^l, <1>^l | l <- lanes(n-1)>
+
+Lanes = set(lanes(K))
+
+LaneList = lanes(K)
+
+-- The implemented channels are:
+
+channel down: Lanes.{0..K}
+
+channel over: Lanes.{0..K-1}
+
+-- So the ith node in lane l is
+
+NODE(l,i) = normal(Node(down.l.i,down.l.i+1,over.l.i,over.c(l,i).i))
+
+-- and the dual of this node is the ith in lane c(l,i):
+
+c(l,i) = <cb(i,j,nth(j,l)) | j<-<0..K-1>> 
+
+cb(i,j,b) = if i==j then 1-b else b
+
+-- The alphabet of the node is
+
+Alpha(l,i) = {down.l.i, down.l.i+1, over.l.i, over.c(l,i).i}
+
+-- As a process list, lane l becomes
+
+Lane(l) = <(NODE(l,K-i),Alpha(l,K-i)) | i <- <1..K>>
+
+-- So the entire network becomes (as a structured network)
+
+System = <Lane(l) | l <- LaneList>
+
+-- and the uncompressed, unabstracted network is
+
+SYSTEM = StructuredPar(System)\{|over|}
+
+-- You can try this on ProBE for K <= 3.
+
+-- These lanes appear to be the most sensible structures to compress
+-- when exploiting compression functions.  After carrying out the
+-- hiding permitted by the abstracted deadlock check it turns out that
+-- (independent of K) the lane process normalises to a single state.
+-- This depends on being able to hide the whole of {|down|} in the lane,
+-- and the partially constructed lanes do not normalize nearly as
+-- well.  
+
+-- The most efficient strategy (this being an issue when K=4) appears
+-- to be to inductively build up the lanes using one compression
+-- function and then apply normalisation before combining them
+-- together.  This is not supported by any one of the standard compression
+-- strategies so we have to piece two of them together:
+
+CompLane(l) = normal(InductiveCompress(sbd)(Lane(l))({|down|}))
+
+
+-- We can then piece these together, doubling up and compressing
+
+AlphaL(l) = Union({Alpha(l,i) | i <- {0..K-1}})
+
+AlphaLS(ll) = if #ll==K then AlphaL(ll)
+                       else union(AlphaLS(ll^<0>),AlphaLS(ll^<1>))
+
+
+LANES(ll) = if #ll==K then CompLane(ll)
+            else let IF = inter(AlphaLS(ll^<0>),AlphaLS(ll^<1>))
+		 within 
+		   normal((LANES(ll^<0>) [|IF|] LANES(ll^<1>))\IF)
+
+-- The main deadlock check is then
+
+assert LANES(<>) :[deadlock free [F]]
+
+-- which can be compared to the uncompressed version
+
+assert SYSTEM :[deadlock free [F]]
+
+-- which only works for K<=2 as this system has 4^(K*2^K) states
+

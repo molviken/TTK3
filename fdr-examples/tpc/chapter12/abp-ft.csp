@@ -1,0 +1,147 @@
+-- abpft.csp (from Section 12.3)
+
+-- alternating bit protocol illustrating fault tolerance via abstraction
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of some of the CSP processes in Section 12.3 into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE.  
+
+-- You can find more examples of this style of fault tolerance modelling
+-- in the directory further_ft
+
+--#+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+#
+
+-- Lazy abstraction: the following use of compression is worthwhile
+-- because it always halves the number of states visited!
+
+transparent normal
+
+LAbs(X)(P) = (P [|X|] normal(CHAOS(X)))\X
+
+--*+**+**+**+**+**+**+**+**+**+**+**+**+**+**+**+**+**+**+**+**+**+**+**+**+*
+
+-- The following material is simply copied from the earlier file:
+
+-- CHANNELS and DATA TYPES
+-- left and right are the external input and output, which we set to
+-- one-bit.  a and b carry a tag and a data value.
+-- c and d carry an acknowledgement tag.  In this protocol tags are bits.
+
+DATA = {0,1}  -- in a data-independent program, where nothing is done to
+              -- or conditional on data, this is sufficient to establish
+              -- correctness
+TAG = {0,1}   -- the alternating bits.
+
+channel left,right:DATA
+channel a,b:TAG.DATA
+channel c,d:TAG
+
+-- The overall specification we want to meet is that of a buffer.  The
+-- most nondeterministic (left-to-right) buffer with size bounded by N is
+-- given by BUFF(<>), where
+
+BUFF(s) = if (null(s)) then (left?x -> BUFF(<x>))
+          else  ((right!(head(s)) -> BUFF(tail(s)))
+                 [](STOP |~| (if ((#s)==N) then STOP
+                              else (left?x -> BUFF(s^<x>)))))
+
+-- For our purposes we will set
+
+N = 3  -- since this example does not introduce more buffering than this.
+
+SPEC = BUFF(<>)
+
+--~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~
+
+-- We can replace the channels E and F of the previous file by ones
+-- that can commit an arbitrary number of errors (loss or duplication)
+-- where these errors are controlled by special events:
+
+channel lose,dup
+
+Errors = {lose,dup}
+
+CE(in,out) = in?x -> (out!x -> CE'(in,out,x)
+                     [] lose -> CE(in,out))
+
+CE'(in,out,x) = dup -> out!x -> CE'(in,out,x)
+                [] CE(in,out)
+
+E = CE(a,b)
+
+F = CE(c,d)
+
+-- We can check that this does what we want, as discussed in the text,
+-- as follows:
+
+-- without errors it is a reliable buffer
+
+assert COPY(a,b) [FD= CE(a,b)[|Errors|]STOP
+
+-- with errors abstracted it behaves like the medium from chapter08/abp-sfm.csp
+
+assert C(a,b) [F= LAbs(Errors)(CE(a,b))
+assert LAbs(Errors)(CE(a,b)) [F= C(a,b)
+
+COPY(in,out) = in?x -> out!x -> COPY(in,out)
+
+C(in,out) = in?x -> C'(in,out,x)
+
+C'(in,out,x) = out!x -> C'(in,out,x)
+            |~| in?y -> C'(in,out,y)
+
+--~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~~"~
+
+-- The implementation of the protocol consists of a sender process and
+-- receiver process, linked by E and F above.  
+
+-- The sender process is parameterised by the current value it tries to send
+-- out, which may be null in which case it does not try to send it,  but
+-- instead accepts a new one from channel left.
+
+Null=99  -- any value not in DATA
+
+SEND(v,bit) = (if (v == Null) then 
+                (left?x -> SEND(x,(1-bit))) else 
+                (a!bit!v -> SEND(v,bit)))
+              [](d?ack ->(if (ack==bit) then SEND(Null,bit) 
+                        else SEND(v,bit)))
+
+-- Initially the data value is Null & bit=1 so the first value input gets bit=0.
+
+SND = SEND(Null,1)
+
+-- In this version of the protocol we will consider only the
+-- receiver that alternates messages and acks
+
+RECimp(bit) = b?tag?data -> (if (tag==bit) then 
+                                         (right!data -> c!tag -> RECimp(1-bit))
+                                       else (c!tag -> RECimp(bit)))
+
+RCVimp=RECimp(0)
+
+--(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)(0)
+
+-- The system in which the error events are visible is
+
+SYSTEME = SND[|{|a,d|}|]((E|||F)[|{|b,c|}|]RCVimp)\{|a,b,c,d|}
+
+-- The result of abstracting these errors is 
+
+SYSTEMA = LAbs(Errors)(SYSTEME)
+
+-- We can choose to prove either that the abstracted version
+-- satisfies the functional specification:
+
+assert COPY(left,right) [F= SYSTEMA
+
+-- or to use the canonical fault tolerance specification (normally
+-- used only when the functional spec is not so easy to construct)!
+
+NoError = SYSTEME [|Errors|] STOP
+
+assert NoError [F= SYSTEMA
+

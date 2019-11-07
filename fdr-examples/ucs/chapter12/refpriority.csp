@@ -1,0 +1,157 @@
+-- refpriority.csp
+
+-- This file picks up on a theme in chapter11/reftest.csp
+-- and shows how to perform checks that act as though
+-- the object system is prioritised.
+
+-- Somewhat perversely, the implementation is allowed to perform any
+-- series of actions, including ones where its priority rules are
+-- violated.  Instead we design specifications that move to the
+-- don't care state DIV if an action breaking the priority rules
+-- have occurred.
+
+-- We use the divergence-strict version of the refusal testing model
+-- for better efficiency thanks to "don't care" working better.
+
+channel left,ahead,right,back: Points
+channel left',ahead',right',back'
+
+channel done
+
+-- For Chapters 12 and 20 of UCS.
+
+-- The example in this file is mazes, of which the following is an example
+
+{-
+maze = <<0,0,0,1,0,0,0>,
+        <0,1,0,0,0,1,0>,
+        <0,1,1,1,0,0,0>,
+        <0,0,0,1,1,1,0>,
+        <0,1,0,0,0,0,0>,
+        <0,1,1,1,1,1,0>,
+        <0,0,0,0,0,1,0>>
+-}
+
+maze = <<0,1,0,1,0,0,0>,
+        <0,1,0,0,0,1,0>,
+        <0,1,1,1,0,0,0>,
+        <0,0,0,1,1,1,0>,
+        <0,1,0,0,0,0,0>,
+        <0,1,1,1,1,1,0>,
+        <0,0,0,0,0,1,0>>
+
+-- Starting at the top-left corner, one can move a horizontal or
+-- vertical step to a 0 square, with the objective of reaching the
+-- bottom right.  At any time our explorer has a direction, initially
+-- E (east).  He moves into another square with a priority order, which
+-- we set to be
+
+priority = <left,ahead,right,back>
+
+-- directions in a form where we can calculate
+
+N=0
+E=1
+S=2
+W=3
+
+Exp(p,d) = if p == target then done -> Exp(p,d) else
+           (ok(lt(d,p)) & left.lt(d,p) -> Exp(lt(d,p),(d+3)%4)
+           [] ok(ah(d,p)) & ahead.ah(d,p) -> Exp(ah(d,p),d)
+           [] ok(rt(d,p)) & right.rt(d,p) -> Exp(rt(d,p),(d+1)%4)
+           [] ok(bk(d,p)) & back.bk(d,p) -> Exp(bk(d,p),(d+2)%4))
+
+ok(p) = member(p,Points)
+
+-- the adjacent point in the four directions based on current position
+
+lt(d,p) = inc(p,v((d+3)%4))
+ah(d,p) = inc(p,v(d))
+rt(d,p) = inc(p,v((d+1)%4))
+bk(d,p) = inc(p,v((d+2)%4))
+           
+inc((i,j),(k,l)) = (i+k,j+l)
+
+v(0) = (-1,0)
+v(1) = (0,1)
+v(2) = (1,0)
+v(3) = (0,-1)
+
+System = Exp((0,0),E)[|{|left.s,right.s,ahead.s,back.s| s <- Blocks|}|]STOP
+
+nth(0,xs) = head(xs)
+nth(n,xs) = nth(n-1,tail(xs))
+
+val((i,j)) = nth(j,nth(i,maze))
+
+ht = #maze
+wd = #(head(maze))
+
+target = (ht-1,wd-1)
+
+Points = {(i,j) | i <- {0..ht-1}, j <- {0..wd-1}}
+
+Blocks = {p | p <- Points, val(p)==1}
+
+-- Checking for reachability without priority
+
+assert STOP [T= System\diff(Events,{done})
+
+-- Priority by specification.
+
+-- We only want to consider behaviours in which each event
+-- only happens when all higher priority ones have been refused.
+
+-- We do so using renamings that collapse all events in a
+-- given direction to one.  This greatly simplifies the following
+
+PSpec = STOP 
+        |~| left' -> PSpec
+        |~| ahead' -> PSpec
+        |~| right' -> PSpec
+        |~| back' -> PSpec
+        |~| (ahead' -> Bottom [] left' -> PSpec)
+        |~| (right' -> Bottom [] (left' -> PSpec |~| ahead' -> PSpec))
+        |~| (back' -> Bottom [] (left' -> PSpec |~| ahead' -> PSpec 
+                               |~| right' -> PSpec))
+
+RenSystem = System[[left.p <- left',
+                    ahead.p <- ahead',
+                    right.p <- right',
+                    back.p <- back' | p <- Points]]
+
+-- You will find that counterexample traces found by this
+-- check always obey the priority order.  This is particularly
+-- obvious if you look at the second maze above.
+
+-- The check in the divergence-strict model
+
+assert PSpec [RD= RenSystem
+
+Bottom = DIV
+DIV = DIV |~| DIV
+
+{-
+-- Alternatively you can define
+
+Bottom = RCHAOS
+RCHAOS = STOP |~| (|~| x:Events @ x -> RCHAOS)
+
+-- the bottom member of the stable refusal testing model, and try
+
+assert PSpec [R= RenSystem
+
+-}
+
+
+
+-- Do you think this prioritised search will solve any soluble maze?
+
+-- This suggests that there is a completely general way of 
+-- simulating a prioritised traces check using an unprioritised [RD= check:
+
+-- Allow all events that the specification does in a given state,
+-- allow STOP,
+-- and allow all events of other than top priority (whether the spec
+-- allows them or not)  in combination with
+-- any higher-priority one that the specification does allow.

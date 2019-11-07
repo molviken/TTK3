@@ -1,0 +1,10 @@
+At the time of writing there is no direct implementation of the 
+implementation of Timed CSP available.  Therefore the example in
+this directory illustrates some of the tactics for translating
+restricted forms of Timed CSP to tock-CSP that are discussed in the
+Chapter.  For a simpler example, note that TCOPY2 is exactly
+time(COPY).
+
+The main obstacle to doing this comprehensively is the external choice
+operator [], as discussed in the book.
+

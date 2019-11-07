@@ -1,0 +1,122 @@
+
+-- uc3.csp 
+
+-- Basic examples from Chapter 3
+
+-- A.W. Roscoe, June 2010 
+
+-- This file complements "Understanding concurrent systems" and 
+-- contains the examples other than dining philosophers, pantomime horse
+-- n COPYs and
+-- "ROBOTS" from Chapter 3.  (See separate files for these.)
+
+-- Repeat of some definitions from Chapter 1
+
+channel a,b,c
+
+channel getup,eat, breakfast,work,lunch,play,dinner,tv,gotobed,sleep,swim,jog,read,wake
+
+-- Demonstrating communication by synchronisation:
+
+REPEAT = [] x:Events @ x -> x -> REPEAT
+
+AS = a -> AS
+
+aRR = (a -> REPEAT)[|Events|]REPEAT
+
+-- AS and aRR have identical behaviours:
+
+assert AS [T= aRR
+assert aRR [T= AS
+
+-- Peter and Maggie
+
+-- we need to define them completely for FDR, so we make use of the
+-- states defined in Chapter 1:
+
+Peter = getup -> (jog -> breakfast -> Up
+                 [] breakfast -> jog -> Up)
+
+Maggie = getup -> (swim -> breakfast -> Up
+                 [] breakfast -> swim -> Up)
+
+-- The following check demonstrates their deadlock
+
+assert Peter[|Events|]Maggie :[deadlock free]
+
+
+Asleep = sleep -> Asleep
+         [] wake -> InBed
+
+InBed = sleep -> Asleep
+        [] read -> InBed
+        [] tv -> InBed
+        [] getup -> Up
+
+Up = gotobed -> InBed
+     [] read -> Up
+     [] eat -> Up
+     [] tv -> Up
+     [] work -> Up
+     [] play -> Up
+
+
+-- But with alphabetised parallel:
+
+DEvents = {getup,eat, breakfast,work,lunch,play,dinner,tv,gotobed,sleep,swim,jog}
+
+AP = diff(DEvents,{swim})
+AM = diff(DEvents,{jog})
+
+assert Peter [AP||AM] Maggie :[deadlock free]
+
+-- Bargaining
+
+Item = {1..5}
+Money = {0..20}
+
+channel buy:Item.Money
+channel outofstock:Item
+
+pval(x) = (7*x + 1)%8  -- say
+mval(x) = (5*x + 3)%7  -- say
+
+vallist = <(pval(x),mval(x)) | x <- <1..5>>
+-- display this in the Evaluate mode of FDR to see the bargaining positions
+
+
+Merchant(X) = buy?x:X?y:{mval(x)..10} -> Merchant(diff(X,{x}))
+              [] outofstock?_:diff(Item,X) -> Merchant(X)
+
+Customer(Y) = |~| x:Item @ (buy.x?y:{0..min(Y,pval(x))} -> Customer(Y-y)
+                           [] outofstock.x -> Customer(Y))
+
+assert Customer(30) [|{|buy,outofstock|}|] Merchant({1,2,3,4}) :[deadlock free]
+-- Deadlock can occur if either there is an item such that no
+-- agreement on price is possible or if the customer can run out of
+-- money before aquiring the merchant's complete stock.
+
+min(x,y) = if x < y then x else y
+
+-- A useful way of investigating how processes behave is by getting
+-- FDR to report traces of a specified length, perhaps with a
+-- certain property.  So, for example we can define
+
+NEvs(0) = STOP
+NEvs(n) = [] x:Events @ x -> NEvs(n-1)
+
+-- namely the process that can perform up to n events, and
+-- investigate specifications like
+
+assert NEvs(10) [T= Customer(30) [|{|buy,outofstock|}|] Merchant({1,2,3,4}) 
+
+-- Running the above does not deliver the most thrilling result!
+
+-- We can customise specifications for individual examples:
+
+Buy(0) = outofstock?n -> Buy(0)
+
+Buy(n) = buy?_ -> Buy(n-1)
+         [] outofstock?_ -> Buy(n)
+
+assert Buy(2) [T= Customer(30) [|{|buy,outofstock|}|] Merchant({1,2,3,4}) 

@@ -1,0 +1,79 @@
+--Timed version of token ring from chapter 4.
+-- To find out how long it takes to transport a set of messages
+-- for comparison with the non-blocking ring.
+
+T={0}
+
+N=4
+tokens = 2
+
+Nodes = {0..N-1}
+
+datatype Token = Empty | Full.Packet
+
+Packet = {(a,b,m) | a <- Nodes, b <- Nodes, m <- T}
+
+channel ring:Nodes.Token
+
+channel tock
+
+channel send,receive:Nodes.Nodes.T
+
+
+NodeE(n) = ring.n.Empty -> tock ->  NodeR(n)
+           [] ring.n?Full.(a,b,m) -> tock -> NodeF(n,a,b,m)
+           [] tock -> NodeE(n)
+
+NodeR(n) = send.n?b:diff(Nodes,{n})?m -> tock -> NodeF(n,n,b,m)
+           [] tock -> NodeR'(n)
+
+NodeR'(n) = send.n?b:diff(Nodes,{n})?m -> tock -> NodeF(n,n,b,m)
+           [] ring.(n+1)%N.Empty -> tock -> NodeE(n)
+           [] tock -> NodeR'(n)
+
+NodeF(n,a,b,m) = if b==n then receive.n.a.m -> tock -> NodeR(n)
+                 else (ring.(n+1)%N.Full.(a,b,m) -> tock -> NodeE(n)
+                       [] tock -> NodeF(n,a,b,m))
+
+A(n) = {|ring.n,ring.(n+1)%N,send.n,receive.n, tock|}
+
+Init(n) = if n<tokens then NodeR(n) else NodeE(n)
+
+
+Ring = (|| i:Nodes @[A(i)] Init(i))\{|ring|}
+
+TOCKS = tock -> TOCKS
+
+assert TOCKS [FD= (CHAOS({|send|})[|{|send|}|] Ring)\diff(Events,{tock})
+
+Sender(n) = send.n?b!0 -> STOP
+Sender2(n) = send.n?b!0 -> send.n?b -> STOP
+
+SRing = (Ring [|{|send|}|] (||| n:Nodes @ Sender(n)))\{|send|}
+SRing2 = (Ring [|{|send|}|] (||| n:Nodes @ Sender2(n)))\{|send|}
+
+By(0) = tock -> By(0)
+By(k) = receive?x ->  By(k)
+        [] tock -> By(k-1)
+
+-- The following checks show the time taken by various
+-- values of the parameter N and tokens.
+
+assert By(23) [T= SRing :[tau priority over]:{tock}
+assert By(24) [T= SRing :[tau priority over]:{tock}  -- N=5, token=3
+assert By(25) [T= SRing :[tau priority over]:{tock}
+assert By(26) [T= SRing :[tau priority over]:{tock}  -- N=5, token=2
+assert By(33) [T= SRing :[tau priority over]:{tock}
+assert By(34) [T= SRing :[tau priority over]:{tock}  -- N=5, token=4
+assert By(41) [T= SRing :[tau priority over]:{tock}
+assert By(42) [T= SRing :[tau priority over]:{tock}  -- N=5, token=1
+        
+assert By(80) [T= SRing2 :[tau priority over]:{tock}  
+assert By(81) [T= SRing2 :[tau priority over]:{tock}  -- N=5, token=1
+assert By(46) [T= SRing2 :[tau priority over]:{tock}  
+assert By(47) [T= SRing2 :[tau priority over]:{tock}  -- N=5, token=2
+assert By(39) [T= SRing2 :[tau priority over]:{tock}  
+assert By(40) [T= SRing2 :[tau priority over]:{tock}  -- N=5, token=3
+
+assert By(30) [T= SRing2 :[tau priority over]:{tock}  
+assert By(35) [T= SRing2 :[tau priority over]:{tock}  -- N=4, token=2

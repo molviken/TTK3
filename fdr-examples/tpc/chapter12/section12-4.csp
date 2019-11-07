@@ -1,0 +1,194 @@
+-- section12-4.csp 
+
+-- simple security examples
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of some of the CSP processes in Section 12.4 of those into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE.  
+
+-- Note that the major example from this section (Example 12.4.1) is
+-- in a separate file (commsec.csp) and that there are further examples
+-- not discussed in the book in further_security
+
+--#+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+##+#
+
+-- Basic examples
+
+-- The events for the basic examples:
+
+channel l,l1,l2,ls1,ls2,h,h1,h2,hs1,hs2
+
+H = {h,h1,h2,hs1,hs2}
+
+S = {ls1,ls2,hs1,hs2}
+
+-- Lazy and mixed abstraction operators:
+
+LAbs(X)(P) = (P [|X|] CHAOS(X))\X
+
+MAbs(X,Y)(P) = let hdelay = diff(X,Y) within
+               (P [|hdelay|] CHAOS(hdelay))\X
+
+-- The basic examples, together with the checks discussed in the text:
+
+P1 = h -> l -> P1
+
+assert LAbs(H)(P1) :[deterministic [F]]
+
+P2 = h -> l -> P2
+  [] l -> P2
+
+assert LAbs(H)(P2) :[deterministic [F]]
+
+P3 = l1 -> P3'
+  [] h1 -> P3
+
+P3' = l2 -> P3
+   [] h2 -> P3'
+
+assert LAbs(H)(P3) :[deterministic [F]]
+assert IntAbs(H)(P3) :[deterministic [F]]
+
+-- (see the note at the bottom of this file about the above checks)
+
+P4 = l1 -> ls1 -> P4
+  [] l2 -> ls2 -> P4
+  [] h1 -> hs1 -> P4
+  [] h2 -> hs2 -> P4
+
+assert LAbs(H)(P4) :[deterministic [F]]
+assert MAbs(H,S)(P4) :[deterministic [F]]
+assert MIntAbs(H,S)(P4) :[deterministic [F]]
+
+-- (see the note at the bottom of this file about the above checks)
+
+P5 = hs1 -> l -> P5
+
+assert MAbs(H,S)(P5) :[deterministic [F]]
+
+P6 = hs1 -> l1 -> P6
+ |~| hs2 -> l2 -> P6
+
+assert MAbs(H,S)(P6) :[deterministic [F]]
+
+--~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-- Memory example (copied from section12-1.csp)
+
+datatype USER = Lois | Hugh
+
+datatype DATA = Zero | One
+
+ADDR = {1..5}
+
+channel write:USER.ADDR.DATA
+channel value:USER.DATA
+channel  read:USER.ADDR
+channel  ok,reject:USER
+
+-- In order to test the effects of different patterns of read and write
+-- privileges, we add an extra parameter to Mem to hold these:
+
+Mem(map,s) = let 
+             (WriteAddresses, ReadAddresses) = map
+	     within
+	     (  write?user?addr?v ->
+                (if member(addr,WriteAddresses(user)) then
+	            ok.user -> Mem(map,update(s,addr,v))
+	         else
+	            reject.user -> Mem(map,s))
+             [] read?user?addr ->
+             (if member(addr,ReadAddresses(user)) then
+	         value.user!fetch(s,addr) -> Mem(map,s)
+	      else
+	         reject.user -> Mem(map,s)))
+
+-- The high, low and signal events:
+
+M_H = {|value.Hugh,read.Hugh,ok.Hugh,reject.Hugh,write.Hugh|}
+M_L = {|value.Lois,read.Lois,ok.Lois,reject.Lois,write.Lois|}
+M_S = {|value,ok,reject|}
+
+-- A starting state
+
+s_0 = {(x,Zero) | x <- ADDR}
+
+-- The state implemented as a set of pairs
+
+fetch(s,x) = let pick({y}) = y
+             within
+	     pick({v | (x',v) <- s, x'==x})
+
+update(s,x,v) = union({(x',v') | (x',v') <- s, x!=x'},{(x,v)})
+
+-- Two possible sets of write/read privileges
+
+MAP1 = ({1,2},{1,2,3},{1,4},{4})
+MAP2 = ({1,2,3},{1,2,3},{4,5},{3,4,5})
+
+wa((wh,rh,wl,rl))(u) = if u==Hugh then wh else wl
+ra((wh,rh,wl,rl))(u) = if u==Hugh then rh else rl
+
+map1 = (wa(MAP1),ra(MAP1))
+map2 = (wa(MAP2),ra(MAP2))
+
+-- The first of these is secure because Lois can't read from anywhere
+-- that Hugh can write to.  The second is not because of address 3.
+
+assert MAbs(M_H,M_S)(Mem(map1,s_0)) :[deterministic [F]]
+assert MAbs(M_H,M_S)(Mem(map2,s_0)) :[deterministic [F]]
+
+--!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!!*!
+
+-- PLEASE NOTE
+
+-- Many of the above checks are based (for reasons discussed in the
+-- text) on failures determinism checking of processes which can actually
+-- diverge in the representations given in this file.  With such checks,
+-- at the time of writing, it is possible that no answer will be found by FDR.
+-- This happens when in the "determinizing" pre-pass on the system (as
+-- described at the end of Section 9.1) a divergence is encountered.
+
+-- This appears to be rare in the particular style of check used here
+-- (of a lazy or mixed
+-- abstraction), and I hope to find ways of adjusting the algorithms to
+-- make it rarer or impossible.
+-- If it does happen to you it may help simply to
+-- reload the file and try again, or failing that to use the equivalent
+-- security check described in Section 12.6: instead of checking the
+-- determinism of LAbs(H)(P), check the determinism of IntAbs(H)(P), defined
+
+IntAbs(X)(P) = RUN(X) ||| P
+MIntAbs(X,Y)(P) = RUN(diff(X,Y)) ||| (P\inter(X,Y))
+
+RUN(X) = [] x:X @ x -> RUN(X)
+
+-- I have encountered this problem with two of the checks listed above,
+-- and have included the alternative checks for those.
+
+-- In some cases this interleaving approach can be slower, and it loses
+-- you the possibility of the gains to be made from compression associated
+-- with the usual lazy abstraction.
+
+-- An alternative method, avoiding both problems is to replace the 
+-- check
+
+-- assert LAbs(H)(P) :[deterministic [F]]
+
+-- by the pair
+
+-- assert P[|H|]STOP :[deterministic [FD]]
+-- assert P[|H|]STOP [F= LAbs(H)(P)
+
+-- which must both hold.
+-- This is another equivalent of lazy independence, but the indecision
+-- cannot occur.
+
+-- For mixed abstraction this becomes
+
+-- assert (P[|diff(H,S)|]STOP)\inter(H,S) :[deterministic [FD]]
+-- assert (P[|diff(H,S)|]STOP)\inter(H,S) [F= MAbs(H,S)(P)
+

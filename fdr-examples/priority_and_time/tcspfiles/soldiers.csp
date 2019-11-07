@@ -1,0 +1,87 @@
+-- soldiers.csp
+-- Bill Roscoe, December 2011
+-- Soliders and bridge puzzle illustrating scheduling with Timed CSPO
+
+{-
+The story: a group of soldiers are on one side of a bridge and
+want to reach the other.  Some of them are wounded, so they take
+variable times to cross
+-}
+
+Dlist = <4,5,7,10,12,23,30>
+D = set(Dlist)
+
+-- Here is how many there are with each delay
+
+Count(4) = 1
+Count(5) = 3
+Count(7) = 4
+Count(10) = 2
+Count(12) = 1
+Count(23) = 6
+Count(30) = 5
+
+Sum(<>) = 0
+Sum(<x>^xs) = x + Sum(xs)
+Total = Sum(Dlist) -- for Evaluating
+
+-- Soldiers enter the bridge from left or right, marked by their delay.
+
+channel enterL,enterR:D
+channel done
+channel tock
+-- We build all the delays in this example via WAIT
+
+AllZero(x) = 0
+
+Timed(AllZero){
+
+-- The soldiers must carry a light to cross, and
+-- can only cross singly or in pairs.
+
+-- The light can be picked up by one soldier,
+-- or two at the same time: 
+
+LightL = enterL?d1 -> (enterL?d2 -> WAIT(max(d1,d2));LightR) 
+         [] enterL?d1 -> (WAIT(d1);LightR)
+LightR = enterR?d1 -> (enterR?d2 -> WAIT(max(d1,d2));LightL) 
+         [] enterR?d1 -> (WAIT(d1);LightL)
+         [] done -> LightR
+
+-- note that the Light is calculating the crossing time as the
+-- maximum of the two times if there are two soldier.
+
+max(x,y) = if x > y then x else y
+
+-- A soldier can move to and fro, and when it is at RHS
+-- can cooperate on done.
+
+SoldierL(d) = enterL.d ->  SoldierR(d)
+SoldierR(d) = done -> SoldierR(d) [] enterR.d -> SoldierL(d)
+
+transparent sbisim
+
+-- The use of sbisim here eliminates a lot of symmetry:
+
+Soldiers(d,1) = SoldierL(d) 
+Soldiers(d,n) = sbisim(Soldiers(d,n-1) [|{done}|] SoldierL(d))
+
+AllSoldiers = [|{done}|] d:D @ Soldiers(d,Count(d))
+
+System = LightL [|{|enterL,enterR,done|}|] AllSoldiers 
+}
+
+external prioritise_nocache
+prioritise = prioritise_nocache
+pri(X) = prioritise(X,<{},{tock}>)
+
+TOCKS = tock -> TOCKS
+assert TOCKS [T= pri(System)\{|enterL,enterR|}
+
+-- The number of tocks taken to find a solution is, with BFS, guaranteed
+-- to be minimal amongst all solutions.
+
+
+
+
+

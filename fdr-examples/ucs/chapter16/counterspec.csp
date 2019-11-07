@@ -1,0 +1,62 @@
+-- counterspec.csp
+
+-- An approach to infinite-state specifications
+
+-- This file illustrates the idea shown in Section 16.4 of
+-- making a process act recursively as its own specification,
+-- enabling us establish that arbitrarily large processes
+-- satisfy infinite-state specifications such as counter.
+
+-- The definitions from the book:
+
+channel up,down,up'
+
+CounterR(P) = P[[up <- up', up <- up]] [|{up,up'}|] Reg
+
+Reg = up -> Reg [] up' -> STOP
+
+-- CounterR(P) has the same traces as P plus ones
+-- in which a final up has been replaced by up'
+
+
+CounterL(P) = (P|||up' -> down -> STOP) [|{up,up',down}|]UpFirst
+
+-- CounterL(P) has the traces of P with perhaps up' compensated by down
+-- added, subject to the constraint of starting in up or up'
+
+UpFirst = [] x:{up,up'} @ x -> RUN({up,up',down})
+
+RUN(X) = [] x:X @ x -> RUN(X)
+
+
+-- Processes that should satisfy this
+
+Ct(N,m) = m < N & up -> Ct(N,m+1)
+          [] m > 0 & down -> Ct(N,m-1)
+
+
+DCt(N,m) = m < N & up -> up -> Ct(N,m+1)
+          [] m > 0 & down -> down -> Ct(N,m-1)
+
+
+-- One that should not 
+
+Poly0 = up -> Poly1
+Poly1 = up -> Poly2
+        [] down -> Poly0
+Poly2 = up -> Many
+        [] down -> Poly1
+Many = up -> Many
+       [] down -> Many 
+
+assert CounterL(Ct(100,0)) [T= CounterR(Ct(100,0))
+assert CounterL(DCt(100,0)) [T= CounterR(DCt(100,0))
+assert CounterL(Ct(100,0)/\DCt(100,0)) [T= CounterR(Ct(100,0)/\DCt(100,0))
+assert CounterL(Poly0) [T= CounterR(Poly0)
+
+-- Think about why this last specification fails.
+
+-- The remarkable thing about the the third check above is how large the
+-- normalisation and running phases of this check are, considering how
+-- few states the process actually has.
+

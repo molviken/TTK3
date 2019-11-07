@@ -1,0 +1,61 @@
+-- maxpro.csp
+
+-- illustrating the principle of maximal progress
+-- and the tau priority model
+
+-- See Chapter 14 of Understanding Concurrent Systems
+
+-- Chaining timed COPY Processes together
+
+T = {0}
+
+channel left,right,mid:T
+channel tock
+
+-- Timed version of >> chain
+
+tchain(P,Q) = (P[[right.x <- mid.x | x <- T]][|{|mid,tock|}|]
+               Q[[left.x <- mid.x | x <- T]])\{|mid|}
+
+-- Timed version of COPY
+
+TCOPY2 = tock -> TCOPY2
+         [] left?x -> tock -> TCOPY2'(x)
+
+TCOPY2'(x) = tock -> TCOPY2'(x)
+             [] right!x -> tock -> TCOPY2
+
+TCOPY3 = tock -> TCOPY3
+         [] left?x -> tock ->  right!x -> tock -> TCOPY3
+
+
+-- We can chain n TCOPY3s together
+
+CHAIN(1) = TCOPY3
+CHAIN(n) = tchain(TCOPY3,CHAIN(n-1))
+
+-- of n-1 TCOPY2s with a TCOPY3 on the right to ensure that
+-- the chain outputs when it cam
+
+CHAIN'(1) = TCOPY3
+CHAIN'(n) = tchain(TCOPY2,CHAIN'(n-1))
+
+-- The following trace specification says that there is an
+-- output on right within N tocks whenever an output
+-- is pending.
+
+BDDOUT(0,_,N) = left?x -> BDDOUT(1,N,N)
+              [] tock -> BDDOUT(0,0,N)
+
+BDDOUT(n,k,N) = (n < N) & left?x -> BDDOUT(n+1,k,N)
+               [] (k > 0) & tock -> BDDOUT(n,k-1,N)
+               [] right?x -> BDDOUT(n-1,N,N)
+
+assert BDDOUT(0,4,4) [T= CHAIN(3) 
+assert BDDOUT(0,4,4) [T= CHAIN'(3) 
+assert BDDOUT(0,4,4) [T= CHAIN'(3) :[tau priority]: {tock}
+
+
+TOCKS(n) = n>0 & tock -> TOCKS(n-1)
+
+

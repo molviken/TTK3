@@ -1,0 +1,40 @@
+
+-- ncopyl.csp 
+
+-- chaining COPY processes together -- link parallel
+
+-- Original version of COPY
+
+N = 10  -- the number of COPYs
+
+T = {0,1}  -- the type passed over channels
+
+COPY = left?x -> right!x -> COPY
+
+channel left,right:T
+
+CCL(1) = COPY
+CCL(n) = CCL(n-1)[left <-> right]COPY
+
+
+-- Same specification as ncopyh with different channel names:
+
+B(s) = #s<N & left?x -> B(s^<x>)
+       [] #s>0 & right.head(s) -> B(tail(s))
+
+Spec = B(<>)
+
+
+assert Spec [T= CCL(N) 
+assert CCL(N) [T= Spec
+
+-- For Chapter 6:
+
+-- Also true in stronger models:
+
+assert Spec [FD= CCL(N) 
+assert CCL(N) [FD= Spec
+
+
+
+

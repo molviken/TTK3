@@ -1,0 +1,310 @@
+-- Using compression on puzzles.
+
+-- Bill Roscoe, June 1996
+
+-- We take the same puzzle descriptions as in the file "exchhop.csp"
+-- and show how FDR2 compression technology can help to solve them
+-- faster.
+
+-- This file does not do the compression using the high-level functions
+-- from compression.csp (having been written before it).  
+
+-- The standard compression functions of FDR2 are the following:
+
+ transparent sbisim
+ transparent normal
+ transparent model_compress
+ transparent diamond
+
+-- If you want to use them in a file you need to declare them as
+-- "transparent" as above.
+
+datatype colours = red | white | blank | noslot
+
+
+channel done
+
+-- The following self-explanatory notation allows you to create puzzles
+-- where there must be a single blank in the middle position.  White
+-- pegs move up and right, reds move left and down, each either moving into
+-- an adjacent blank or hopping over one of the opposite colour into a
+-- blank.  X denotes a slot that is not there.
+
+-- The following is the two-dimensional version you can buy.
+
+Picture'(1)= <<X,X,R,R,R>,
+             <X,X,R,R,R>,
+	     <W,W,B,R,R>,
+	     <W,W,W,X,X>,
+	     <W,W,W,X,X>>
+
+-- and the following are some other examples:
+
+Picture'(2)= <<X,X,X,X,X,R,R>,
+             <X,X,X,R,R,R,R>,
+             <X,X,X,R,R,R,X>,
+             <X,X,W,B,R,X,X>,
+             <X,W,W,W,X,X,X>,
+             <W,W,W,W,X,X,X>,
+             <W,W,X,X,X,X,X>>
+
+Picture'(3) = <<X,X,X,X,X,X,R,R,R,R,R,R,X>,
+               <W,W,W,W,W,W,B,R,R,R,R,R,R>,
+	       <X,W,W,W,W,W,W,X,X,X,X,X,X>>
+
+Picture'(4) = <<X,X,X,X,R,R,R,R,R>,
+              <X,X,X,X,R,X,R,X,R>,
+	      <X,X,X,X,R,R,R,R,R>,
+	      <X,X,X,X,B,X,X,X,X>,
+	      <W,W,W,W,W,X,X,X,X>,
+	      <W,X,W,X,W,X,X,X,X>,
+	      <W,W,W,W,W,X,X,X,X>>
+
+Picture'(5) = <<X,X,X,X,R,R,R,R,R>,
+              <X,X,X,X,R,X,R,R,R>,
+	      <W,W,W,W,B,R,R,R,R>,
+	      <W,W,W,X,W,X,X,X,X>,
+	      <W,W,W,W,W,X,X,X,X>>
+
+Picture'(6)= <<X,X,X,R,R>,
+             <X,X,R,R,R>,
+	     <W,W,B,R,R>,
+	     <W,W,W,X,X>,
+	     <W,W,X,X,X>>
+
+Picture'(7)= <<X,X,R,X,X>,
+             <X,X,R,R,X>,
+	     <W,W,B,R,R>,
+	     <W,W,W,X,X>,
+	     <X,X,X,X,X>>
+
+Picture'(8)= <<X,X,X,R,R,R,R>,
+             <X,X,X,R,R,R,R>,
+	     <W,W,W,B,R,R,R>,
+	     <W,W,W,W,X,X,X>,
+      	     <W,W,W,W,X,X,X>>
+
+Picture'(9)= <<X,X,X,R,R,R,R>,
+             <X,X,X,R,X,R,R>,
+             <X,X,X,R,R,R,R>,
+	     <W,W,W,B,R,R,R>,
+	     <W,W,X,W,X,X,X>,
+	     <W,W,W,W,X,X,X>,
+	     <W,W,W,W,X,X,X>>
+
+Picture'(10) = <<W,W,W,W,W,W,W,W,W,W,W,W,B,R,R,R,R,R,R,R,R,R,R,R,R>>
+
+Picture'(11)=<<X,X,X,X,X,X,R>,
+              <X,X,X,X,X,R,R>,
+              <X,X,X,R,R,R,R>,
+	      <W,W,W,B,R,R,R>,
+	      <W,W,W,W,X,X,X>,
+	      <W,W,X,X,X,X,X>,
+	      <W,X,X,X,X,X,X>>
+
+Picture = Picture'(11)
+
+H = #Picture-1
+Wd = #(head(Picture))-1
+N = H + Wd
+
+-- We make the assumption, in order to structure our compression, that
+-- the puzzle is constructed in such a way that the single blank slot
+-- is in the middle of the picture, judged by the dimensions of the
+-- picture.  If you want to try an asymmetric puzzle where this is not
+-- the case you should pad out the picture with blank rows/columns so
+-- that it is re-established.  The following is then the index of the
+-- diagonal row on which the blank sits.
+
+M=(H+Wd)/2
+
+channel left,right,up,down,lefthop,righthop,uphop,downhop:{0..H}.{0..Wd}
+
+-- The component processes and alphabets are identical to those in
+-- the earlier file.
+
+White(target,i,j,l,r,u,d) = 
+          (r>0 & right.i.j+1 -> Blank(target,i,j,l,r,u,d))
+          [](r>1 & righthop.i.j+2 -> Blank(target,i,j,l,r,u,d))
+          [](u>0 & up.i+1.j -> Blank(target,i,j,l,r,u,d))
+          [](u>1 & uphop.i+2.j -> Blank(target,i,j,l,r,u,d))
+          []((r>0 and l>0) & 
+	     lefthop.i.j-1 -> White(target,i,j,l,r,u,d))
+          []((u>0 and d>0) & 
+	     downhop.i-1.j -> White(target,i,j,l,r,u,d))
+	  [](target == white & done -> STOP)
+
+
+Red(target,i,j,l,r,u,d) = 
+          (l>0 & left.i.j-1 -> Blank(target,i,j,l,r,u,d))
+          [](l>1 & lefthop.i.j-2 -> Blank(target,i,j,l,r,u,d))
+          [](d>0 & down.i-1.j -> Blank(target,i,j,l,r,u,d))
+          [](d>1 & downhop.i-2.j -> Blank(target,i,j,l,r,u,d))
+          [](l>0 and r>0 &
+	     righthop.i.j+1 -> Red(target,i,j,l,r,u,d))
+          [](d>0 and u>0 & 
+	     uphop.i+1.j -> Red(target,i,j,l,r,u,d))
+	  [](target == red & done -> STOP)
+
+Blank(target,i,j,l,r,u,d) = 
+          (r>0 & left.i.j -> Red(target,i,j,l,r,u,d))
+          [](r>1 & lefthop.i.j -> Red(target,i,j,l,r,u,d))
+          [](u>0 & down.i.j -> Red(target,i,j,l,r,u,d))
+          [](u>1 & downhop.i.j -> Red(target,i,j,l,r,u,d))
+          [](l>0 & right.i.j -> White(target,i,j,l,r,u,d))
+          [](l>1 & righthop.i.j -> White(target,i,j,l,r,u,d))
+          [](d>0 & up.i.j -> White(target,i,j,l,r,u,d))
+          [](d>1 & uphop.i.j -> White(target,i,j,l,r,u,d))
+	  [](target == blank & done -> STOP)
+
+Alpha(i,j) = Union({{done},
+                    {left.i.k | k <- {j-1,j}, k>=0,member((i,k),Board)},
+                    {right.i.k | k <- {j,j+1}, k<=Wd,member((i,k),Board)},
+                    {down.k.j | k <- {i-1,i}, k>=0,member((k,j),Board)},
+                    {up.k.j | k <- {i,i+1}, k<=H,member((k,j),Board)},
+                   {lefthop.i.k | k <- {j-2,j-1,j}, k>=0,member((i,k),Board)},
+                   {righthop.i.k | k <- {j,j+1,j+2}, k<=Wd,member((i,k),Board)},
+                   {downhop.k.j | k <- {i-2,i-1,i}, k>=0,member((k,j),Board)},
+                   {uphop.k.j | k <- {i,i+1,i+2}, k<=H,member((k,j),Board)}})
+
+X = noslot
+R = red
+W = white
+B = blank
+
+isslot((i,j,a)) = (a!=noslot)
+
+BoardList = filter(isslot,
+            <(i,j,nth(j,nth(H-i,Picture))) | i<-<0..H>, j <- <0..Wd>>)
+
+Board = set(<(i,j) | (i,j,c) <- BoardList>)
+
+-- We are going to build up the puzzle incrementally in diagonal rows 
+-- (top left to bottom right) in two lumps: one containing all the
+-- initially red slots and one containing all the initially white ones...
+
+-- Therefore we extract these rows and form the alphabet of each.
+
+Row(k) = {(i,j,c) | (i,j,c) <- set(BoardList), i+j==k}
+
+-- Where a complex function is going to be called multiply for all 
+-- possible arguments, it is beneficial to cache the values of the
+-- function rather than recomputing it each time.
+
+AlphaRow'(k) = Union({Alpha(i,j) | (i,j,c) <- Row(k)})
+
+AlphaRows = <AlphaRow'(k) | k <- <0..N>>
+
+AlphaRow(k) = nth(k,AlphaRows)
+
+-- The following is then the process representing a single one of these
+-- rows.
+
+ProcRow(k) = if Row(k) == {} then STOP
+             else || (i,j,c):Row(k) @ [Alpha(i,j)] MakeNode(septuple((i,j,c)))
+
+filter(pred,xs) = <x | x <- xs, pred(x)>
+
+map(f,xs) = <f(x) | x <- xs>
+
+septuple((a,b,c)) = (a,b,c,
+                 if not member((a,b-1),Board) then 0 else
+                 if not member((a,b-2),Board) then 1 else 2,
+                 if not member((a,b+1),Board) then 0 else
+                 if not member((a,b+2),Board) then 1 else 2,
+                 if not member((a+1,b),Board) then 0 else
+                 if not member((a+2,b),Board) then 1 else 2,
+                 if not member((a-1,b),Board) then 0 else
+                 if not member((a-2,b),Board) then 1 else 2)
+
+
+MakeNode((i,j,c,r,l,u,d)) = if c== white then White(red,i,j,r,l,u,d)
+                                 else if c==red then Red(white,i,j,r,l,u,d)
+                                 else Blank(blank,i,j,r,l,u,d)
+
+
+nth(n,xs) = if n==0 then head(xs) else nth(n-1,tail(xs))
+
+-- From the structure of these puzzles, and the fact they only have
+-- a single blank slot initially, we can deduce that each block of
+-- slots inevitable alternates moves out and moves in.  
+-- It is highly beneficial to compressions to build this fact into
+-- the partially constructed portions of the puzzle, since it prevents
+-- the compression routines wasting time on states they will never
+-- reach in a run.
+
+OutThenIn(S) = [] x:inter(S,{|right,righthop,up,uphop|}) @ x -> InThenOut(S)
+
+InThenOut(S) = [] x:inter(S,{|left,lefthop,down,downhop|}) @ x -> OutThenIn(S)
+
+-- We will get compression in this example by hiding those moves in partially
+-- constructed puzzles that are entirely internal and thus cannot affect
+-- what is possible at the interface.  The diamond and normalisation functions
+-- are best at dealing with this type of compression, with sbisim being used
+-- to remove any duplication at the output of diamond (there is a built-in
+-- sbisim in normal).   The following function decides which to apply based
+-- on a numerical parameter.  You could experiment with different functions.
+-- It is rather difficult to predict which function will work best where.
+
+mycompress(n,P) = if n < 3 and n < M-1 then normal(sbisim(P))
+                         else sbisim(diamond(P))
+
+-- The following function builds up the bottom-left portion of the puzzle
+-- a row at a time, using the OutThenIn function to impose the global invariant
+-- and hiding those moves that are entirely internal to the portion of puzzle
+-- constructed so far, so that the compression function has something to
+-- work on.
+
+RowsTo(compress)(n) = if n==1 then
+                   (ProcRow(0)[AlphaRow(0)||AlphaRow(1)]ProcRow(1))
+	    else
+	       compress(n,((RowsTo(compress)(n-1)[AlphaRow(n-1)||AlphaRow(n)]
+	       ProcRow(n))\diff(AlphaRow(n-1),AlphaRow(n+1)))
+	       [|diff(AlphaRow(n),{done})|]
+	       OutThenIn(inter(AlphaRow(n),AlphaRow(n+1))))
+
+-- And this does the symmetric job starting from the other end.
+
+RowsBackTo(compress)(n) = if n==N-1 then
+                   (ProcRow(N)[AlphaRow(N)||AlphaRow(N-1)]ProcRow(N-1))
+	    else
+	       compress(N-n,((RowsBackTo(compress)(n+1)
+	       [AlphaRow(n+1)||AlphaRow(n)]
+	       ProcRow(n))\diff(AlphaRow(n+1),AlphaRow(n-1)))
+	       [|diff(AlphaRow(n),{done})|]
+	       InThenOut(inter(AlphaRow(n),AlphaRow(n-1))))
+
+-- All but the middle row (which will consist of a single blank) is now in these
+-- two parts; the entire puzzle can then be made up by putting these together.
+
+Puzzle(compress) = (RowsTo(compress)(M-1)[AlphaRow(M-1)||AlphaRow(M+1)]
+                    RowsBackTo(compress)(M+1))
+                     [|AlphaRow(M)|]
+	           (ProcRow(M))
+
+-- The following check then looks for a solution.  
+-- IT IS IMPORTANT TO NOTE THAT SINCE SOME OF THE MOVES IN THE PUZZLE HAVE
+-- BEEN HIDDEN IN ORDER TO GET COMPRESSION, YOU WILL NOT BE ABLE TO READ
+-- THE COMPLETE SOLUTION OFF THE DEBUGGER IN ONE GO.  
+-- The highest level will tell you the moves involving the middle slot;
+-- the other moves can be inferred by looking at lower levels of the
+-- debug tree (i.e., inside the hiding).
+
+assert CHAOS(diff(AlphaRow(M),{done})) [T= Puzzle(mycompress)
+
+-- We can assess the effects of compression by running the alternative
+-- check
+
+transparent explicate
+nocompress(n,P)=explicate(P)
+
+assert CHAOS(diff(AlphaRow(M),{done})) [T= Puzzle(nocompress)
+
+-- The use of explication here substantially speeds this check up
+-- without changing the number of states.
+
+-- You will find that compression usually has a beneficial effect on the
+-- time taken to solve big puzzles, though the effectiveness varies
+-- enormously from puzzle to puzzle, it usually being most effective
+-- on ones where the individual rows are small.
+

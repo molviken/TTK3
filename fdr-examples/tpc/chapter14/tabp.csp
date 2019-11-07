@@ -1,0 +1,303 @@
+-- tabp.csp
+
+-- Timed version of the Alternating bit protocol.
+
+-- Bill Roscoe, July 1995
+
+-- The alternating bit protocol is usually presented using time-outs
+-- to determine retransmission.  This file uses the tock-timed version
+-- of CSP to specify this type of behaviour.
+
+-- In this file we are using the standard semantics of CSP -- this treatment
+-- does not require the prioritised version of FDR
+
+channel tock
+
+-- In this file the time-outs on resending and reacknowledging data are
+-- controlled by parallel timer processes, whose channels are as follows:
+
+channel reset,timesout
+
+TimeOutVals = {1..10}
+
+channel setup:TimeOutVals
+
+-- The definition of this Time Out Controller process follows.
+-- It behaves like a setable and resetable timer.
+
+TOC = setup?t -> Armed(t)
+      [] tock -> TOC
+      [] reset -> TOC
+
+Armed(t) = (if t==0 then timesout -> TOC else tock -> Armed(t-1))
+           [] reset -> TOC
+
+
+
+
+
+-- left and right are the external input and output, which we set to
+-- one-bit.  a and b carry a tag and a data value.
+-- c and d carry an acknowledgement tag.  In this protocol tags are bits.
+
+datatype DATA = Zero | One  
+              -- in a data-independent program, where nothing is done to
+              -- or conditional on data, this is sufficient to establish
+              -- correctness
+TAG = {0,1}   -- the alternating bits.
+
+channel left,right:DATA
+channel a,b:TAG.DATA
+channel c,d:TAG
+channel ack
+
+-- The overall untimed specification we want to meet is that of a buffer.  The
+-- most nondeterministic (left-to-right) buffer with size bounded by N is
+-- given by BUFF(<>), where
+
+BUFF(s) = if (null(s)) then (left?x -> BUFF(<x>))
+          else  ((right!(head(s)) -> BUFF(tail(s)))
+                 [](STOP |~| (if ((#s)==N) then STOP
+                              else (left?x -> BUFF(s^<x>)))))
+
+-- For our purposes we will set
+
+N = 1  -- since this example does not introduce more buffering than this.
+       -- In fact, this implies BUFF(<>) is COPY
+
+SPEC = BUFF(<>)
+
+-- The protocol is designed to work in the presence of lossy channels.
+-- Unlike the untimed example, this version does not rely on the eventual
+-- correct transmission of data to avoid CSP divergence, but we do need
+-- some bound on the loss if we are to prove that data does eventually
+-- get through.  Therefore we use the error model introduced in Section 12.3:
+
+channel error
+
+E = a?tag?data -> tock -> (b!tag!data -> E [] error ->  E)
+    [] tock -> E
+
+F = c?tag -> tock -> (d!tag -> F [] error ->  F)
+    [] tock -> F
+
+-- Note that I have specified that all messages take 1 unit
+-- of time to get through.  Clearly one could make this more nondeterministic.
+
+
+-- The implementation of the protocol consists of a sender process and
+-- receiver process, linked by E and F above.  
+
+-- The sender process is parameterised by the current value it tries to send
+-- out, which may be null in which case it does not try to send it,  but
+-- instead accepts a new one from channel left.
+
+
+-- The following parameters are the times after which the sender and
+-- receiver will respectively time-out and re-try sending a message and
+-- acknowledgement respectively.
+
+-- I believe any combinationa (of numbers greater than 0)
+-- would work provided that they do not re-send
+-- so fast that the medium cannot yet accept the message being given to
+-- it.  So a slower medium would require a longer time-out.
+
+sto = 4
+rto = 3
+
+-- In this treatment I have factored the sender process into three parallel
+-- components: one for transmitting data, one for managing the time-outs
+-- for retransmissions, and one for receiving acknowledgment signals and
+-- filtering out repeats.  By doing this it is easier to ensure that
+-- signals are sent and received at appropriate times.  Of course one could
+-- sequentialise the combination to obtain an equivalent non-parallel process!
+
+Send(bit) = left?x -> tock -> Snd1(bit,x)
+            [] tock -> Send(bit)
+
+Snd1(bit,x) = a!bit!x -> setup!sto -> Snd2(bit,x)
+              [] ack -> Send(1-bit)
+
+Snd2(bit,x) = timesout -> Snd1(bit,x)
+              [] tock -> Snd2(bit,x)
+	      [] ack -> Send(1-bit)
+
+-- The following process sends the ack signal just when it gets each new
+-- acknowledgment signal.
+
+SAck(bit) = d.bit -> ack -> SAck(1-bit)
+            [] d.1-bit -> SAck(bit)
+	    [] tock -> SAck(bit)
+
+-- Note below that this ack event is used to reset timeout timer.
+
+SEND = (((Send(0)[|{|tock,setup,ack,timesout|}|]
+              TOC[[reset <- ack]])\{|setup,timesout|})
+		[|{|tock,ack|}|] SAck(0))\{ack}
+
+-- The receiver has one main component plus a timer, which is only reset
+-- (now explicitly) when a new (rather than repeat) input is received.
+-- In this sense its behaviour is not a classic timeout, since there are
+-- events the main process does that do not reset the timer.
+
+Rec(bit) = b?tag?data -> (if (tag==bit) then 
+                              reset -> tock -> right!data -> c!bit -> 
+				      setup!rto -> Rec(1-bit)
+                                      else Rec(bit))
+           [] timesout -> c!1-bit -> setup!rto -> Rec(bit)
+           [] tock -> Rec(bit)
+
+REC = (Rec(0) [|{|tock,setup,timesout,reset|}|] TOC)\{|setup,timesout,reset|}
+               
+
+
+SYSTEM = SEND[| {|a,d,tock|} |]((E[|{tock}|]F)[| {|b,c,tock|} |]REC)\{|a,b,c,d|}
+
+-- Since our checks involve putting this in various contexts, it is
+-- advantageous to compress it to
+
+transparent normal
+
+CompSYS = normal(SYSTEM)
+
+
+-- a process which is equivalent but with less states. 
+-- (The checks in this file are not big enough to make this necessary, unless
+-- you want to try some rather more complex versions of the last one, but
+-- it is a good illustration of one place it is useful to use this feature of
+-- FDR2.  See Appendix C for more details.)
+
+
+-- Aside from tock, the external alphabet of this system is 
+-- {|left, right, error|}.  Of these events we aree relying on the environment
+-- accepting the system's outputs (on right) promptly.  Therefore the timing
+-- consistency check deems the delayable events to be the complement of this
+-- set.  It is appropriate to include the event error in this set since not
+-- to do so would mean that we could not exclude the possibility that the
+-- process is relying on some errors happening to ensure correct behaviour!
+
+D = {|left,error|}
+
+TimingConsistency = (CompSYS[|D|]normal(CHAOS(D)))\diff(Events,{tock})
+
+-- which should be failures-divergences checked against
+
+Tocks = tock -> Tocks
+
+assert Tocks [FD= TimingConsistency
+
+
+-- The above specification is really non-functional: it simply shows that
+-- our definitions make sense.  What we will now do is to show that
+-- the system satisfies the untimed buffer specification, and furthermore
+-- that all the offers demanded by that specification take no
+-- longer than a fixed length of time to materialise: 
+
+ReadyBy=6
+
+-- From here on we largely follow the pattern set out in t-ut1.csp
+
+-- We transform the timed implementation process by allowing either of two
+-- sorts of tock events when the original communicates the original one:
+
+channel tock1,tock2,anyother
+
+RTIMP = CompSYS[[tock <- x | x <- {tock1, tock2}]]
+
+-- and define a process (Reg) that specifies that the first ReadyBy tocks after
+-- any visible event (or the beginning of time) are tock1's, and any 
+-- subsequent ones tock2's.
+
+REG(N,n) = anyother -> REG(N,N)
+       [] (if n==0 then tock2 -> REG(N,0) else tock1 -> REG(N,n-1))
+
+Reg = REG(ReadyBy,ReadyBy)[[anyother <- x | 
+                             x <- diff(Events,{tock,tock1,tock2})]]
+
+-- The effect of putting these two processes in parallel:
+
+RegTIMP = RTIMP [|Events|] Reg
+
+-- is to create a process identical to SYSTEM except that the first ReadyBy 
+-- of any run of tocks become tock1's, the rest tock2's.
+
+-- The trick now is to hide the tock1's (which cannot create divergence),
+-- and to use lazy abstraction on the tock2's.  In our case we must prove
+
+assert SPEC [F= LAbs({tock2,error})(RegTIMP\{tock1})
+
+TOCK2S = tock2 -> TOCK2S
+
+-- This establishes that the refusal of the implementation process is correct
+-- when either (i) ReadyBy time units have passed either from the begining or 
+-- the last non-tock event or (ii) the process insists on a communication before
+-- allowing time to pass (i.e., relies on communication with the environment).
+
+-- Since Reg allows an error event to reset its clock, what we are attempting
+-- to prove is (inter alia) that a datum will be output at the right hand
+-- side within ReadyBy time units of the latest of the input event on left
+-- and any error event.  
+
+--+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*+-*
+
+-- The following section shows how to make assumptions about the error rate
+-- and establish what happens then...
+
+-- The following processes allow us to express a bound on the number of
+-- error events occurring in a particular interval:
+
+ER1'(T,j) = if 0<j then tock -> ER1'(T,j-1)
+            else (tock -> ER1'(T,0) [] (STOP |~| error -> ER1'(T,T)))
+
+ER1(T) = ER1'(T,0)  -- allows at most one error in any T time units
+
+-- The following process allows up to N in any EInt:
+
+ERN(N,EInt) = normal([|{tock}|] i:{1..N} @ ER1(EInt))
+
+-- (Compression is used here to get rid of the tau actions introduced by
+-- |~| and the symmetry of this example.)
+
+
+-- Limiting the system to at most N errors every EInt units ....
+
+CSYSTEM(N,EInt) = (CompSYS [|{error,tock}|] ERN(N,EInt))\{error}
+
+-- We seek to establish that this meets the untimed COPY specification
+-- in much the same way as above.
+
+CRTIMP(N,EInt) = CSYSTEM(N,EInt)[[tock <- x | x <- {tock1, tock2}]]
+
+-- Since errors are not now resetting the clock for offers (they are hidden),
+-- it is likely that we will need a longer wait for the system to settle.
+-- Obviously this will vary with the other parameters, and for a high enough
+-- error rate no number here would be big enough!
+
+
+Reg1(ReadyBy) = REG(ReadyBy,ReadyBy)[[anyother <- x | 
+                                x <- diff(Events,{tock,tock1,tock2})]]
+
+-- The effect of putting these two processes in parallel:
+
+RegCTIMP(N,EInt,ReadyBy) = CRTIMP(N,EInt) [|Events|] Reg1(ReadyBy)
+
+-- The substantive checks then take the form below.
+-- The following examples
+-- are all chosen to be close to the limits of error  tolerance:
+-- The ReadyBy=50 cases are apparently ones where the error rate is too great
+-- for any wait to be enough.
+
+assert SPEC [F= LAbs({tock2})(RegCTIMP(1,10,6)\{tock1})
+assert SPEC [F= LAbs({tock2})(RegCTIMP(1,9,7)\{tock1})
+assert SPEC [F= LAbs({tock2})(RegCTIMP(2,10,10)\{tock1})
+assert SPEC [F= LAbs({tock2})(RegCTIMP(2,10,11)\{tock1})
+assert SPEC [F= LAbs({tock2})(RegCTIMP(2,9,12)\{tock1})
+assert SPEC [F= LAbs({tock2})(RegCTIMP(2,8,50)\{tock1})
+assert SPEC [F= LAbs({tock2})(RegCTIMP(3,13,15)\{tock1})
+assert SPEC [F= LAbs({tock2})(RegCTIMP(3,12,50)\{tock1})
+
+
+-- Lazy abstraction
+
+LAbs(X)(P) = (P[|X|]normal(CHAOS(X)))\X
+

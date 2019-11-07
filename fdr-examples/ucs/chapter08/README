@@ -1,0 +1,14 @@
+This directory contains the main examples connected with Chapter 8.
+
+As I write this the implementation of watchdog transformations available
+in FDR is rather complex and counter-intuitive to use, so I prefer to
+wait till there is a better one available before publishing example
+files for it.
+
+There are further large examples of compression in action to be found under
+Chapter 13 and Appendix C of TPC and Chapter 18 of UCS.
+
+virtroute.csp is included here rather than under Chapter 4 because
+compression is crucial to it.
+
+

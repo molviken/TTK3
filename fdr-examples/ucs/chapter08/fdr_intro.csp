@@ -1,0 +1,78 @@
+-- fdrintro.csp
+-- Bill Roscoe, March 2009
+
+-- This very simple script is designed to illustrate the
+-- basic capabilities of FDR
+
+-- First, some simple processes
+
+channel a,b,c
+
+P = a -> b -> P
+
+Q = a -> b -> Q
+    [] c -> STOP
+
+R = a -> b -> R
+    |~|
+    c -> STOP
+
+Div = Div |~| Div
+
+-- Some checks to carry out on them (some true, some false)
+
+assert P [T= Q
+assert Q [T= P
+assert Q [F= P
+assert R [F= P
+assert R [F= Q
+assert Q [F= R
+assert Q [T= R
+assert Q :[deterministic]
+assert R :[deterministic]
+assert P :[deadlock-free]
+assert R :[deadlock-free]
+assert Div :[divergence-free]
+assert Div [FD= R
+assert P [F= Div
+
+-- Examples of non-process language
+
+factorial(0) = 1
+factorial(n) = n*factorial(n-1)
+
+reverse(<>) = <>
+reverse(<x>^s) = reverse(s)^<x>
+
+reverse'(<>,t) = t
+reverse'(<x>^s,t) = reverse'(s,<x>^t)
+
+facs = {(x,factorial(x)) | x <- {0..9}}
+
+fact(n) = pick({m | (n',m) <- facs, n'==m})
+
+pick({x}) = x    -- the function that maps a one-element
+                 -- set to its unique member
+
+-- Finite and infinite state processes
+
+
+Inf1(n) = a -> b -> Inf1(n+1)
+
+Inf2 = a -> Inf2'(0,0)
+Inf2'(n,0) = a -> Inf2'(n+1,n+1)
+Inf2'(n,m) = b -> Inf2'(n,m-1)
+
+Fin(0) = P
+Fin(n) = a -> b -> Fin(n-1)
+
+-- The following checks do not work because Inf1 and Inf2 are infinite state.
+
+assert P [T= Inf1(0) 
+
+assert P [T= Inf2
+
+-- The following does work because Fin(n) is actually finite state:
+
+assert P [T= Fin(1000)
+

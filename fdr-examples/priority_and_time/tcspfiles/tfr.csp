@@ -1,0 +1,171 @@
+-- tfr.csp
+-- Bill Roscoe, June 2012
+
+-- Implementing Timed Failures Refinement (for tock/discrete Timed) CSP
+-- using refusal testing.
+
+{-
+While Timed Failures refinement is not directly implemented
+in CSP, the only way to check for it is to find a monotonic mapping C[]
+into another model M with the property that if P={TF}Q then C[P]={M}Q
+The only reasonable choice at present is the refusal testing model RT.
+
+TF, like RT, records a series of refusal sets through a trace.
+The differences are:
+
+(i) In TF, refusals are only recorded immediately before tock events.
+(ii) In TF, the event tock is never refused and never happens from an
+     unstable state.
+
+It follows that in TF, every finite behaviour (sequence of events and
+tocks with a refusal set immediately before each tock) can be extended
+by the pair <{},tock> and so two processes are equivalent if and only
+if their sets of behaviours ending in <{},tock> are equal.
+
+This file comes in two parts: my relatively straightforward initial attempt
+to create C, and then a discussion of why this does not quite work and
+how to fix it.
+
+In the first attempt we eliminate all refusal sets with both the following
+both properties from behaviours 
+
+(a) Not immediately before a tock
+(b) Not immediately before the very last event of the behaviour.
+
+Note that this transformation ensures that the RT behaviours of C[P] that
+end in <<>,tock> are the same as those of the the TF representation of P.
+
+C[] is a tock-CSP context that can be applied to timed CSP processes.
+-}
+
+Sigma = diff(Events,{tock})
+
+TFReg = ([] x:Sigma @ x -> TFReg) 
+         [>  (tock -> TFReg [] ([] x:Events @ x -> DIV))
+
+DIV = DIV |~| DIV
+
+-- Note that the only stable state of this process is the only where
+-- all events are offered, but that performing an event other than
+-- tock there leads to certain divergences.
+
+-- Thus in the Stable Refusal Testing models, the only refusal sets
+-- appearing before any event are {} before any tock and before the
+-- last event of the trace.  Thus our first attempt is
+
+C1(P) = P [|Events|]TFReg
+
+-- This allows all traces of P, but only preserves the refusal sets that
+-- appear either before the very last event or before any tock.
+-- This creates exactly the right mapping to TF behaviours of the
+-- form s^<X,tock>, but unfortunately can allow differences based on
+-- the RT behaviours of the form s^<X,a,*> where * is the "non-refusal" used
+-- in that model to record non-observation of a stable refusal.
+
+-- This turns out, particularly in the presence of the no-instantaneous
+-- withdrawal (NIW) property of Timed CSP, to be a very subtle distinction.
+-- However the following pair of processes (constructed after much trial and
+-- error) illustrate it.
+
+channel a,b,c
+channel tock
+Timed{
+
+P = (((a -> WAIT(1))[>WAIT(2))
+     |~| (WAIT(1);((a -> SKIP) [> WAIT(1))));P
+
+Q = ((STOP |~| (WAIT(1);((a -> STOP [> STOP)))
+    |~| (((a -> STOP)[]WAIT(1));STOP)) /\ WAIT(2));Q
+}
+
+PP = pri(P)
+QQ = pri(Q)
+
+-- They are equivalent in TF: they may both perform at most one a in any
+-- odd/even pair of time units, 
+-- and may refuse all events other than tock before any
+-- tock (whether or not a has happened in this time interval).
+
+-- However C1[Q] has the behaviour <{},a,*> but C1[P] does not because
+-- P only ever performs a in an unstable state.
+
+assert C1(PP) [R= C1(QQ)
+
+
+
+external prioritise
+pri(X) = prioritise(X,<{},{tock}>)
+
+-- We can put this right by adding further elaboration: ensuring that
+-- C[P] has every concievable behaviour s^<X,a,*> for a not tock, where
+-- the only restriction is that a is not in X.
+
+-- A here is the non-tock alphabet of the process under consideration.
+
+channel dummy
+
+C2(A,P) = ((P [|{|tock|}|] Escape) 
+         [|{dummy}|> 
+         (|~| x:A @ x -> DIV))\{dummy}
+
+Escape = dummy -> STOP |~| tock -> Escape
+
+-- The following attempt did not work because the nondeterministic
+-- choice is not made freshly for every tock:
+
+-- C2E(P) = (P/\(STOP |~| dummy -> (|~| x:Sigma @ x -> DIV)))\{dummy}
+
+-- Note that this does not change the set of RT behaviours ending in <X,tock,*>
+-- but ensures that C2[P] and C2[Q] cannot only differ on the basis of
+-- RT behaviours ending <X,a,*> for a not tock.
+
+C(A,P) = C1(C2(A,P))
+
+assert C({a},PP) [R= C({a},QQ)
+assert C({a},QQ) [R= C({a},PP)
+
+-- Consider, for example, the following three CHAOS processes:
+
+AllZero(_) = 0
+
+Timed(AllZero){
+
+CHAOS1'(A) = ([] x:A @ x -> CHAOS1'(A)) |~| STOP
+
+CHAOS2'(A) = ([] x:A @ x -> SKIP |~| WAIT(1));CHAOS2'(A)
+
+CHAOS3'(A) = (([] x:A @ x -> SKIP) [> WAIT(1));CHAOS3'(A)
+
+}
+CHAOS1(A) = pri(CHAOS1'(A))
+CHAOS2(A) = pri(CHAOS2'(A))
+CHAOS3(A) = pri(CHAOS3'(A))
+
+TCHAOS(A) = [] x:A @ x -> TCHAOS(A) [> tock -> TCHAOS(A)
+
+CHAOS4(A) = TCHAOS(A)
+
+-- Over timed failures, 1 is distinct from the other three, 
+-- which are equivalent
+
+assert C({a,b},CHAOS1({a,b})) [R= C({a,b},CHAOS2({a,b}))
+assert C({a,b},CHAOS2({a,b})) [R= C({a,b},CHAOS1({a,b}))
+assert C({a,b},CHAOS2({a,b})) [R= C({a,b},CHAOS3({a,b}))
+assert C({a,b},CHAOS3({a,b})) [R= C({a,b},CHAOS2({a,b}))
+assert C({a,b},CHAOS3({a,b})) [R= C({a,b},CHAOS1({a,b}))
+assert C({a,b},CHAOS1({a,b})) [R= C({a,b},CHAOS3({a,b}))
+assert C({a,b},CHAOS1({a,b})) [R= C({a,b},CHAOS4({a,b}))
+assert C({a,b},CHAOS4({a,b})) [R= C({a,b},CHAOS1({a,b}))
+assert C({a,b},CHAOS2({a,b})) [R= C({a,b},CHAOS4({a,b}))
+assert C({a,b},CHAOS4({a,b})) [R= C({a,b},CHAOS2({a,b}))
+
+-- But over the full refusal testing model, the pair {CHAOS3,CHAOS4} are
+-- equivalent but distinct from CHAOS2.
+
+assert CHAOS2({a,b}) [R= CHAOS3({a,b})
+assert CHAOS3({a,b}) [R= CHAOS2({a,b})
+assert CHAOS2({a,b}) [R= CHAOS4({a,b})
+assert CHAOS4({a,b}) [R= CHAOS2({a,b})
+assert CHAOS3({a,b}) [R= CHAOS4({a,b})
+assert CHAOS4({a,b}) [R= CHAOS3({a,b})
+

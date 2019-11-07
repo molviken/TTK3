@@ -1,0 +1,171 @@
+-- prifair.csp
+-- Bill Roscoe, May 2012
+-- Fair divergence and unstable failures.
+
+-- This file, based loosely on the main example in
+-- "Fairness Analysis Through Priority"
+-- illustrates the use of priority in analysing fair divergence
+-- and "unstable failures refinement"
+-- This is very loosely based on methods used in Verum's ASD:Suite.
+
+datatype Tags = Respond | Start | VR
+
+-- Channels based on model
+
+channel API : {Start, VR}
+channel Resp : {Respond}
+channel UI : {Start, VR, Respond}
+channel IntUIEvent
+channel Error
+channel SlowEv, FastEv
+
+-- Intended externally visible behaviour
+
+Spec = let
+
+S1 = API.Start -> API.VR -> S2
+
+S2 = (API.Start -> API.VR -> S2)
+     [>
+     Resp.Respond -> S1
+
+within S1
+  
+-- Parallel implementation:
+
+Design = let
+
+D1 = API.Start -> API.VR -> UI.Start -> UI.VR -> D2
+
+D2 = API.Start -> API.VR -> D2
+     []
+     UI.Respond -> Resp.Respond -> D1
+
+within D1 
+
+UsedInterface = let
+
+UI1 = UI.Start -> UI.VR -> UI2
+
+UI2 = UI.Start -> Error -> STOP
+      []
+      IntUIEvent -> SlowEv -> FastEv -> UI2   -- create "slow divergence"
+      [] 
+      UI.Respond -> UI1
+
+within UI1
+
+UsedInterface' = UsedInterface [] OnlyDIV
+
+OnlyDIV = SlowEv -> FastEv -> OnlyDIV
+
+-- Standard Approach
+
+Impl = Design [| {|UI|} |] UsedInterface
+Impl' = Design [| {|UI|} |] UsedInterface'
+
+-- Want to check this meets the specification with internal events 
+-- hidden.
+
+
+assert Spec [F= Impl\diff(Events,{|API, Resp, Error|})
+assert Spec [F= Impl'\diff(Events,{|API, Resp, Error|})
+
+assert Spec [FD= Impl\diff(Events,{|API, Resp, Error|}) 
+
+-- first succeeds but instablity makes this fragile
+-- second fails because of "slow" divergence
+-- (not a distinction that this check makes)
+
+
+-- Priority Approach
+
+external prioritise
+
+channel Dummy
+
+SlowTaus = {IntUIEvent,SlowEv} -- become "fast taus"
+
+Impl_RR = Impl[[x <- x, x <- Dummy | x <- SlowTaus]]
+Impl_RR' = Impl'[[x <- x, x <- Dummy | x <- SlowTaus]]
+
+Impl_Pri = prioritise(Impl_RR,<diff(Events,union(SlowTaus,{Dummy})), SlowTaus>)
+Impl_Pri' = prioritise(Impl_RR',<diff(Events,union(SlowTaus,{Dummy})), SlowTaus>)
+
+-- Check for divergences without an infinity of slow taus:
+
+assert  Impl_Pri\diff(Events,{|API, Resp, Error, Dummy|}):[livelock-free]
+assert  Impl_Pri'\diff(Events,{|API, Resp, Error, Dummy|}):[livelock-free]
+
+
+S1 = API.Start -> API.VR -> S2
+
+S2 = (API.Start -> API.VR -> S2)
+     [>
+     Resp.Respond -> S1
+
+-- Implementing the watchdog-style specification for unstable failures
+-- refinement set out in the paper, given that we know
+
+assert Spec [T= Impl\diff(Events,EXvs)
+
+-- externally visible events as set out in S
+
+EXvs = {|API,Resp,Error|}
+
+-- NR(x) for various specification states (see paper)
+
+NR(0) = {{API.Start}}
+NR(1) = {{API.VR}}
+NR(2) = {{Resp.Respond}}
+
+T(R) = [] X:R @ d -> ([] x:X @ x -> DS)
+
+channel d
+DS = d -> DS   
+
+S0(0) = {API.Start}
+S0(1) = {API.VR}
+S0(2) = {Resp.Respond,API.Start}
+
+-- initial visible events of the same three S states...
+-- and in this S the next state after initial depends only
+-- on the most recent event:
+
+NextS(API.Start) = 1
+NextS(API.VR) = 2
+NextS(Resp.Respond) = 0
+
+Test(i) = (d -> [] x:S0(i) @ x -> Test(NextS(x)))[] T(NR(i))
+
+-- The first of these succeeds, and the second fails because Impl does
+-- not satisfy the spec corresponding to State 1 of Spec.
+
+assert (Impl_Pri[|EXvs|]Test(0))\diff(Events,{|API,Resp,Error,Dummy,d|}):[deadlock-free [FD]]
+assert (Impl_Pri'[|EXvs|]Test(0))\diff(Events,{|API,Resp,Error,Dummy,d|}):[deadlock-free [FD]]
+assert (Impl_Pri[|EXvs|]Test(1))\diff(Events,{|API,Resp,Error,Dummy,d|}):[deadlock-free [FD]]
+
+-- A better counter-example comes from using the following stronger
+-- Spec':
+
+Spec' = let
+
+S1 = API.Start -> API.VR -> S2
+
+S2 = (API.Start -> API.VR -> S2)
+     []
+     Resp.Respond -> S1
+
+within S1
+
+
+assert Spec' [T= Impl\diff(Events,EXvs)
+
+-- The unstable failures check is given by
+
+NR'(2) = {{Resp.Respond},{API.Start}}
+NR'(x) = NR(x)
+
+Test'(i) = (d -> [] x:S0(i) @ x -> Test'(NextS(x)))[] T(NR'(i))
+
+assert (Impl_Pri[|EXvs|]Test'(0))\diff(Events,{|API,Resp,Error,Dummy,d|}):[deadlock-free [FD]]

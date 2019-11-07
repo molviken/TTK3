@@ -1,0 +1,123 @@
+-- cache.csp
+
+-- Bill Roscoe
+
+-- This is the example from Section 15.2.3, whose main role is to
+-- illustrate data-independence arguments involving programs with
+-- equality tests.
+
+-- We will find there are two data independent types here: addresses
+-- and stored values.
+
+datatype address = A1 | A2 | A3 | A4 | A5 | A6 
+
+datatype value = V1 | V2 
+
+AA2 = {A1,A2}
+AA3 = {A1,A2,A3}
+AA4 = {A1,A2,A3,A4}
+AA5 = {A1,A2,A3,A4,A5}
+AA6 = {A1,A2,A3,A4,A5,A6}
+
+VV2 = {V1,V2}
+VV1 = {V1}
+
+channel ra, m_ra:address 
+channel rv, m_rv:value 
+channel w, m_w,loc:address.value 
+
+-- The parameters of Cache respectively are its state (a list of 
+-- address/value/bit triples, the types of address and value, and the
+-- size of the cache.  
+
+-- The cache handles all reads and writes, and where necessary
+-- fetches a new value from main memory, or writes back to main
+-- memory, to achieve this.  For more details see the text:
+
+Cache(ps,A,V,N) = ra?a:A -> 
+                   (if elem(a,<a' | (a',_) <- ps>) then
+                        (rv!val(a,ps) -> Cache(tofront(a,ps),A,V,N))
+                    else if #ps < N then 
+                        m_ra!a -> m_rv?v:V -> rv!v -> 
+                           Cache(<(a,(v,false))>^ps,A,V,N)
+                    else FlushAndRead(ps,a,A,V,N))
+               [] w?a:A?v:V -> 
+		    if elem(a,<a' | (a',_) <- ps>) then
+                        Cache(update(a,v,ps),A,V,N)
+		    else if #ps < N then
+			Cache(<(a,(v,true))>^ps,A,V,N)
+		    else FlushAndWrite(ps,a,v,A,V,N)
+
+-- When a value is removed from the cache, it is written back when
+-- it has been written-to since in the cache.
+
+FlushAndRead(ps^<(a',(v',flush))>,a,A,V,N) = 
+                        if flush then
+                           m_w!a'!v' -> m_ra!a -> m_rv?v -> rv!v ->
+                           Cache(<(a,(v,false))>^ps,A,V,N)
+                        else
+                           m_ra!a -> m_rv?v -> rv!v ->
+                           Cache(<(a,(v,false))>^ps,A,V,N)
+
+FlushAndWrite(ps^<(a',(v',flush))>,a,v,A,V,N) = 
+                        if flush then
+                           m_w!a'!v' -> Cache(<(a,(v,true))>^ps,A,V,N)
+                        else
+                           Cache(<(a,(v,true))>^ps,A,V,N)
+
+-- The functions which manipulate the state:
+
+tofront(a,ps) = <(a',x) | (a',x) <- ps, a'==a>^<(a',x) | (a',x) <- ps, a'!=a>
+
+update(a,v,ps) = <(a,(v,true))>^<(a',x) | (a',x) <- ps, a'!=a>
+
+val(a,ps) = head(<v|(a',(v,_)) <- ps, a'==a>)
+
+-- The following is the version of the memory that is accurate
+-- at only one (settable) address which is described in the text:
+			
+OneLoc(A,V) = loc?a:A?v:V -> OneLoc'(a,v,A,V)
+
+OneLoc'(a,v,A,V) = w?a':A?v':V -> (if a==a' then OneLoc'(a,v',A,V) 
+                                          else OneLoc'(a,v,A,V))
+                [] ra?a':A -> (if a==a' then rv!v -> OneLoc'(a,v,A,V)
+			       else |~| v':V @ rv!v' -> OneLoc'(a,v,A,V))
+
+-- So the process to test (for refinement of OneLoc) is 
+
+Test(A,V,N) = loc?a:A?v:V -> 
+                    (Cache(<>,A,V,N) 
+		      [m_ra <-> ra, m_rv <-> rv, m_w <-> w] OneLoc'(a,v,A,V))
+
+-- The following is the test which, in the ways explained in the text,
+-- establishes the refinement for all larger values of its parameters:
+
+assert OneLoc(AA5,VV2) [FD= Test(AA5,VV2,1)
+
+-- A complete memory, with its state modelled as a set of pairs, is
+
+Memory(f,A,V) = ra?a:A -> rv!apply(f,a) -> Memory(f,A,V)
+                [] w?a:A?v:V ->
+		   Memory(fnupdate(f,a,v),A,V)
+
+init(v,A) = {(a,v) | a <- A}
+
+apply(f,a) = let pick({x})=x within
+             pick({v | (a',v) <- f, a'==a})
+
+fnupdate(f,a,v) = union({(a,v)},{(a',v') | (a',v') <- f, a'!=a})
+
+-- Our "real" objective is to show that the following process: the 
+-- memory enslaved to the cache, refines the memory itself.
+
+Test2(A,V,N) = Cache(<>,A,V,N) 
+	        [m_ra <-> ra, m_rv <-> rv, m_w <-> w] 
+               Memory(init(V1,A),A,V)
+
+-- While we can verify examples of this, like
+
+assert Memory(init(V1,AA5),AA5,VV2) [FD= Test2(AA5,VV2,1)
+
+-- this check is not directly amenable to data-independent reasoning in the
+-- address datatype and (as discussed in the text) the general case has
+-- to be inferred from the OneLoc result above.

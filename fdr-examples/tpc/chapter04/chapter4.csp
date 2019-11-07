@@ -1,0 +1,167 @@
+
+-- chapter4.csp
+
+-- illustrating the machine-readable versions of >> and //
+
+-- A.W. Roscoe
+
+-- This file complements my book on CSP, and is essentially just
+-- a translation of some of the CSP processes in Chapter 4 of those into
+-- the machine-readable version of CSP, with suggested things to do with them 
+-- on FDR and ProBE.  
+
+-- This is the first of two files for chapter 4, and deals with 
+-- the basics.  See the file infexamples.csp for some rather more interesting
+-- processes.
+
+-- The operators >> and // are both replaced
+-- by the more type-correct and general [a <-> b, ...] form of
+-- machine-readable CSP.
+
+
+-- Just as discussed when this idea was introduced in the book, it is
+-- a good idea to use different types for left and right in this file, hence
+
+channel left1, right1:{0,1}
+
+-- If we take the standard COPY process
+
+COPY = left1?x -> right1!x -> COPY
+
+-- then we can pipe two of them together
+
+C2 = COPY [right1 <-> left1] COPY
+
+-- or N of them via the corresponding replicated construct
+
+CN(N) = [right1 <-> left1] i:<1..N> @ COPY
+
+-- You can usefully run this on ProBE and will see how the data
+-- progresses down the pipeline.  If you ask it for stable states then
+-- the data will, naturally, cluster at the downstream end of the
+-- pipe.  The functional behaviour can be shown by refinement of the 
+-- process
+
+BN(N,s) = #s<N & left1?x -> BN(N,s^<x>)
+       [] #s>0 & right1!head(s) -> BN(N,tail(s))
+
+assert BN(6,<>) [FD= CN(6)
+
+-- If you are dealing with an example in which the internal channel
+-- of a >> naturally has different type from the external left and right,
+-- then you should use different channel names for these two types,
+-- or else you will break the type-rules of the machine-readable language.
+
+-- So if we have our ITER process (the fact that we are constrained to
+-- run in integers as FDR does not support the reals makes this example
+-- a bit silly).
+
+channel left,right:{1..20}
+channel left',right':({1..20},{1..10})
+
+ITER = left'?(d,x) -> right'!(d,f(d,x)) -> ITER
+
+f(d,x) = (x + d/x)/2
+
+INIT = left?x -> right'!(x,(x+1)/2) -> INIT
+
+FINAL = left'?(d,x) -> right!x -> FINAL
+
+ROOTER = INIT [right' <-> left']
+        (ITER [right' <-> left'] 
+        (ITER [right' <-> left'] 
+	 FINAL))
+
+-- It clarifies the running of this on ProBE enormously if, as
+-- discussed above, you ask it to find stable states for you so
+-- that it forces through the calculation of new data items for you.
+-- This  process has a large state-space, so if you want to run it on FDR you
+-- might sensibly restrict it to one data item at a time:
+
+RestROOTER = ROOTER [|{|left,right|}|] OneDatum
+
+OneDatum = left?x -> right?x -> OneDatum
+
+-- One specification which it might make sense to prove of this one is
+
+ExactRoots = left?x -> let roots = <y | y <- <1..5>, y*y==x>
+                       within
+		       if roots == <> then |~| y:{1..10} @ right.y -> ExactRoots
+		       else right!head(roots) -> ExactRoots
+
+-- In other words, all exact roots are calculated exactly.
+
+assert ExactRoots [FD= RestROOTER
+
+-- With the example given, you should find this works provided there are
+-- at least 2 ITER's in the chain.
+
+-- The RestROOTER version is a lot easier to follow on ProBE than is
+-- the unrestricted version, though obviously you lose the view of
+-- the data-parallelism of the unrestricted version.
+
+--%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+-- The only difficulty in modelling enslavement in machine-readable
+-- CSP is in handling process naming, since as explained in Section 4.3
+-- the addition of an extra name on an event breaks the channel structure
+-- that FDR assumes.
+
+-- Where a process has many slaves and you want a convenient way of
+-- building these names into P's code, it is best to follow the style
+-- indicated in Section 4.3 and make the name an extra "data" component
+-- of the appropriate channel of P:
+
+-- For example, if we define a counter process with an izsero event:
+
+channel up, down, iszero
+
+COUNT(0) = iszero -> COUNT(0)
+         [] up -> COUNT(1)
+
+COUNT(n) = down -> COUNT(n-1)
+         [] up -> COUNT(n+1)
+
+-- then we can use these as slaves to a process which implements a
+-- "bucket sort" over the numbers {1..N} as follows:
+
+M = 10
+
+channel in,out:{1..M}
+channel last,end
+channel inc,dec,empty:{1..M}
+
+BIN = last -> BIN'(M)
+      [] in?x -> inc.x -> BIN
+
+BIN'(0) = end -> BIN
+BIN'(n) = dec.n -> out.n -> BIN'(n)
+         [] empty.n -> BIN'(n-1)
+
+
+BS(0) = BIN
+BS(n) = BS(n-1) [inc.n <-> up, dec.n <-> down, empty.n <-> iszero] COUNT(0)
+
+BucketSort = BS(M)
+
+--BIN uses the slaves to count how many of each value it has received,
+--and decrements them in order to output.
+
+--BucketSort is an infinite-state process, and so only makes sense on
+--ProBE.
+
+--$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&$&
+
+-- When, on the other hand, a process has few slaves with a less array-like
+-- access regime, it can be nicer simply to use something that looks like
+-- what you get in blackboard CSP: when communicating with the slave named a
+-- on channel c use the "shadow" channel m_c.  So, for example, if using
+-- a pair of FPU's in the style discussed in the chapter, you might find
+-- the CPU process using channels called fpu1_fpreq, fpu1_fpout,
+-- fpu2_fpreq and fpu2_fpout and the enslavement implemented
+
+-- (CPU [fpu1_fpreq <-> fpreq, fpu1_fpout <-> fpout] FPU
+
+-- You can find examples of this style in the file infexamples.csp
+-- and also in chapter15/cache.csp.
+

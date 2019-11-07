@@ -1,0 +1,81 @@
+
+-- fischer.csp
+
+-- Bill Roscoe, January 2012
+
+-- Illustrating Fischer's timed mutual exclusion protocol in Timed CSP
+-- with basic compression
+
+channel read,write:Nodes.VT
+channel css,cse:Nodes
+channel tock
+
+-- The two delay parameters used by all nodes:
+
+D = 2
+T = 3
+
+-- Number of nodes:
+
+N = 8
+
+Nodes = {1..N}
+
+-- The type of the shared variable:
+
+VT = {0..N}
+
+allzero(x) = 0
+
+Timed(allzero){
+-- A node, when it reads 0 from the variable, writes
+-- its own identity into the variable within D time units.
+-- This constraint relies on the hiding of write and maximal progress.
+
+Node(i) = [] j:{0..D} @ read.i.0 -> (WAIT(j);write.i.i -> Node2(T,i))
+
+-- It then waits at least T time units before reading the
+-- variable again.  If it reads its own value it performs
+-- its critical section and resets the variable to 0.
+
+Node2(x,i) = WAIT(x);(Node2(1,i)
+                      [>
+                      (read.i?j ->
+                      if i==j then css.i -> cse.i -> write.i.0 -> Node(i)
+                              else Node(i)))
+
+Var(x) = read?i!x -> Var(x) [] write?i?y:{0,i} -> Var(y)
+
+NS = ||| i:{1..N} @  Node(i)
+NS' = ||| i:{1..N} @  wbisim(Node(i))  -- leaf compression
+
+System = (NS [|{|read,write|}|] Var(0))\{|read,write|}
+System' = (NS' [|{|read,write|}|] Var(0))\{|read,write|}
+
+
+CSys(n) = if n==0 then Var(0)
+else if n < 7 then
+ wbisim(pri((CSys(n-1)[|{|read.n,write.n|}|]wbisim(Node(n)))\{|read.n,write.n|}))
+else 
+ pri((CSys(n-1)[|{|read.n,write.n|}|]wbisim(Node(n)))\{|read.n,write.n|})
+
+
+}
+
+transparent  wbisim
+
+-- Standard mutex specification.
+-- An UNTIMED TRACE specification, hence hiding tock below OUTSIDE pri
+
+Mutex = css?i -> cse!i -> Mutex
+
+assert Mutex [T= pri(System)\{tock}   -- 64M states for N=8
+assert Mutex [T= pri(System')\{tock}  -- 4 M states for N=8
+assert Mutex [T= pri(CSys(N))\{tock}  
+
+-- showing that maximal progress is needed to make our model correct:
+assert Mutex [T= System'\{tock}
+
+external prioritise_nocache
+pri(P) = prioritise_nocache(P,<{},{tock}>)
+

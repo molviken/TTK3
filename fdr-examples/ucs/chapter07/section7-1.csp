@@ -1,0 +1,73 @@
+-- section7-1.csp
+
+-- termination and sequential composition
+
+-- A.W. Roscoe
+
+-- Based on chapter6.csp of UCS
+
+-- The following examples, being infinite-state, will not work on FDR
+-- though they work well on ProBE
+
+channel up, down
+
+ZERO = up -> POS;ZERO
+
+POS = up -> POS;POS
+     [] down -> SKIP
+
+-- Iteration can easily be defined (as it is not directly supported in
+-- machine-readable CSP):
+
+Iter(P) = P;Iter(P)
+
+-- So we can get a one-place buffer as described in the text
+
+T = {0,1}
+
+channel left, right: T
+
+COPY = left?x -> right!x -> COPY
+
+assert COPY [FD= Iter(left?x -> right!x -> SKIP)
+assert Iter(left?x -> right!x -> SKIP) [FD= COPY
+
+-- and the more contrived version of the 2-place buffer:
+
+TB = left?x -> TB'(x)
+
+TB'(x) = right!x -> SKIP
+      [] left?y -> right!x -> TB'(y)
+
+IterBuff2 = Iter(TB)
+
+-- A canonical N-place deterministic buffer:
+
+BN(N,s) = #s<N & left?x -> BN(N,s^<x>)
+       [] #s>0 & right!head(s) -> BN(N,tail(s))
+
+assert IterBuff2 [FD= BN(2,<>)
+assert BN(2,<>) [FD= IterBuff2
+
+-- Semantics of termination
+
+-- At the time of writing FDR does not follow the same semantics
+-- of termination as in TCP and UCP.
+
+-- You can tell this by looking at the semantics of (up -> STOP)[]SKIP
+-- as in
+
+TE = (up -> STOP)[]SKIP
+
+assert TE [FD= TE;SKIP
+
+assert TE;SKIP [FD= TE
+
+-- These two processes are equivalent in the tick-as-signal semantics,
+-- but not in the tick-as-refusable ones of Hoare's book.
+
+-- The tick-as-signal semantics of any process can be recovered by sequential
+-- composition with SKIP:
+
+TE' = TE;SKIP
+

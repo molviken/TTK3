@@ -1,0 +1,187 @@
+
+-- Sliding window protocol, version 1    
+
+-- Bill Roscoe, August 1992...adapted and extended 2010
+
+-- This is second in a set of protocol presentations dealing with
+-- a pair of lossy channels.  It follows on from the alternating bit
+-- protocol in abp.csp, with which it has quite a lot in common.
+
+-- This version presents a simple version of the protocol with the windows
+-- rotating in a finite space of twice their length.
+
+-- CHANNELS AND DATA TYPES
+-- left and right are the external input and output, which we set to
+-- one-bit.  a and b carry a tag and a data value.
+
+-- W is the width of the "window"
+
+W = 4
+
+DATA = {0,1}
+TAG = {0..N-1}
+
+channel left,right:DATA
+channel a,b:TAG.DATA
+channel c,d:TAG
+channel loss, dup
+
+-- The overall specification we want to meet is that of a buffer.  The
+-- most nondeterministic (left-to-right) buffer with size bounded by N is
+-- given by BUFF(<>), where
+
+BUFF(s) = if (s==<>) then (left?x -> BUFF(<x>))
+          else  ((right!(head(s)) -> BUFF(tail(s)))
+                 [](STOP |~| (if ((#s)==B) then STOP
+                              else (left?x -> BUFF(s^<x>)))))
+
+-- For our purposes we will set
+
+B = 2*W-- The maximum buffering introduced by this implementation.
+       -- Increasing the window size or introducing more buffering at
+       -- input or output would increase this.
+
+N = 2*W -- The period with which the indexes rotate
+
+
+
+SPEC = BUFF(<>)
+
+-- The protocol is designed to work in the presence of lossy channels.
+-- Here we use the "controlled error model" set out in Chapter 4 or UCS 
+-- and Chapter 12 of TCP
+
+
+E = a?tag?data -> (loss -> E
+                   [] b!tag!data -> E'(tag,data))
+
+E'(tg,dt) = (dup -> b!tg!dt -> E'(tg,dt))
+          [] 
+           E
+
+F = c?tag -> (loss -> F
+              [] d!tag -> F'(tag))
+
+F'(tg) = (dup -> d!tg -> F'(tg))
+        [] F
+
+
+-- The implementation of the protocol consists of a sender process and
+-- receiver process, linked by E and F above.  They each have a picture
+-- of part of the sequence of values.  A value may not be present for
+-- various reasons, so we need a Null value.
+
+Null = 99  -- any value not in DATA
+
+
+-- In this version the window has length W and the counter cycles round
+-- 0,..,2*W-1.  
+
+-- The sender's state is a W-length sequence of message values or Null,
+-- combined with an index in the range mod N.
+
+-- The values are organised oldest first, with a slot being
+-- Null if it has already been acked.  We can input a new value if the
+-- oldest has been acked, in which case we must advance n.
+
+SEND((sw,n)) = (head(sw)==Null&left?x -> SEND((tail(sw)^<x>,(n+1)%N)))
+             []d?v -> SEND((ack(sw,n,v)))
+             []([](t,v):sends(sw,n)@ a.t.v -> SEND((sw,n)))
+
+
+-- In RCV we have a similar state...
+
+
+RCV((rw,n)) = if (head(rw)!=Null) then 
+                     right!head(rw) -> RCV((tail(rw)^<Null>,(n+1)%N))
+                     else b?t?v -> c!t ->  RCV((update((t+N-n)%N,v,rw),n))
+
+
+
+sends(<>,n) = {}
+sends(s^<x>,n) = if x==Null then sends(s,(n+N-1)%N)
+                 else union({(n,x)},sends(s,(n+N-1)%N))
+
+ack(sw,n,v)=  (nullify((n-v+N)%N,sw),n) 
+
+nullify(n,<>) = <>
+nullify(0,s^<x>) = s^<Null>
+nullify(n,s^<x>) = nullify(n-1,s)^<x>
+
+update(n,v,<>) = <>
+update(0,v,<x>^s) = <v>^s
+update(n,v,<x>^s) = <x>^update(n-1,v,s) 
+
+SND = SEND((blanks,N-1))
+blanks = <Null | i <- <0..W-1>>
+
+
+
+
+
+
+RCVA = RCV((blanks,0))
+
+
+SYSTEM = SND[|{|a,d|}|]((E|||F)[|{|b,c|}|]RCVA)\{|a,b,c,d|}
+
+assert BUFF(<>) [FD= SYSTEM[|{|loss,dup|}|]STOP
+assert BUFF(<>) [T= SYSTEM\{loss,dup}
+assert BUFF(<>) [F= LAbs({loss,dup})(SYSTEM)
+
+LAbs(X)(P) = (P[|X|]CHAOS(X))\X
+
+
+-- Data independence: See Chapter 17 and TCP Chapter 15.
+
+-- It should be fairly clear from the above how to increase the size of the
+-- window.  For `play' examples these may well get expensive with the
+-- current implementation, particularly in the compilation phase of the
+-- substantial SND and RCV processes that would result.  One of the main
+-- issues in this example, much more than in most others one meets in
+-- practice, is the absence of divergence, which requires refine1 as the
+-- refinement program.  However it is clear that the divergence or otherwise
+-- of this example depends in no way on the actual data values, so in a
+-- more substantial version it would be straightforward justifying the
+-- reduction of DATA to a singleton set for an initial Check1 pass.
+-- Equivalently (with the advantage of being runnable in the same environment),
+-- we can simply test
+
+
+OSPEC = ONES[|{|left|}|]SPEC
+
+DC = ONES[|{|left|}|]SYSTEM
+
+ONES = left.1 -> ONES
+
+assert OSPEC [F= LAbs({loss,dup})(DC)
+
+-- Given the data-independence of all of this program, it could similarly
+-- be argued that this one-value pass had established the necessary refusals
+-- (liveness) criteria.   What is does not check is that data values appear
+-- in the right order.  While  not so universal, or trivial
+-- to justify, as the unconditional refinement check a high degree of 
+-- confidence can be gained from testing the refinement
+
+assert XSPEC [F= LAbs({loss,dup})(XSYSTEM)
+
+XSPEC = IREST[|{|left|}|]SPEC
+XSYSTEM = IREST[|{|left|}|]SYSTEM
+
+IREST = left.0 -> IREST [] left.1 -> IREST0
+IREST0 = left.0 -> IREST0
+
+-- which tests the behaviour where only a single input (which one can think
+-- of as a flagged one whose progress we are monitoring) can have value 1.
+-- For this example, this provides something close to a manually generated
+-- equivalent of symbolic testing.  It proves that each input comes out in the
+-- right place and only there.  The advantage on this example is not large,
+-- but should give a much greater speed-up on larger window sizes.
+
+-- Both of these reduced checks are instances of the theorem that if P refines
+-- Q, then C[P] refines C[Q] for any context C[].  A carefully chosen context,
+-- like the ones above, can reduce the state-space while allowing the testing
+-- or verification of a significant aspect of behaviour.
+
+-- If you reduce the size of the window to one, the protocol essentially
+-- reduces to the alternating bit protocol.

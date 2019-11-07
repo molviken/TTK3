@@ -1,0 +1,51 @@
+-- ringd.csp
+
+-- Bill Roscoe
+
+--Token ring from chapter 4 to illustrate tau loop and diamond
+-- as discussed in Chapter 16.
+
+T={0}
+
+N=3
+tokens = 1
+
+Nodes = {0..N-1}
+
+datatype Token = Empty | Full.Packet
+
+Packet = {(a,b,m) | a <- Nodes, b <- Nodes, m <- T}
+
+channel ring:Nodes.Token
+
+channel send,receive:Nodes.Nodes.T
+channel receive':Nodes.T
+
+
+NodeE(n) = ring.n.Empty ->  NodeR(n)
+           [] ring.n?Full.(a,b,m) -> NodeF(n,a,b,m)
+
+NodeR(n) = send.n?b:diff(Nodes,{n})?m -> NodeF(n,n,b,m)
+           [] ring.(n+1)%N.Empty -> NodeE(n)
+
+NodeF(n,a,b,m) = if b==n then receive.n.a.m -> NodeR(n)
+                 else ring.(n+1)%N.Full.(a,b,m) -> NodeE(n)
+
+A(n) = {|ring.n,ring.(n+1)%N,send.n,receive.n|}
+
+Init(n) = if n<tokens then NodeR(n) else NodeE(n)
+
+
+Ring = (|| i:Nodes @[A(i)] Init(i))\{|ring|}
+Ring' = Ring[[receive.a.b.m <- receive'.a.m | a <- Nodes, b <- Nodes, m <- T]]
+
+transparent tau_loop_factor, diamond, sbisim
+
+TFR = tau_loop_factor(Ring)
+DR = diamond(Ring)
+SBDR = sbisim(DR)
+
+TFR' = tau_loop_factor(Ring')
+DR' = diamond(Ring')
+SBDR' = sbisim(DR')
+
